@@ -46,7 +46,4 @@ router.put('/parent/:token', parentRespond)
 router.get('/:id', protect, authorizeRoles('warden1', 'admin'), getSingleOutpass)
 
 
-router.get('/my-students',      protect, authorizeRoles('warden1'),           getMyStudentsOutpasses)
-router.get('/by-rollnumber/:rollNumber', protect, authorizeRoles('warden2'),  getOutpassByRollNumber)
-router.get('/:id',              protect, authorizeRoles('warden1', 'admin'),  getSingleOutpass)
 module.exports = router

@@ -1,12 +1,17 @@
 const Outpass = require('../models/Outpass')
 const FaceScanLog = require('../models/FaceScanLog')
 const { verifyFace } = require('../services/faceService')
+const { requireAssignedGateWarden, requireStatus } = require('../utils/outpassGuards')
+const { createParentVerificationToken } = require('../utils/parentVerification')
 
 // @route  POST /api/face/verify-exit
 // @access Warden2
 const verifyExit = async (req, res) => {
   try {
     const { image, outpassId } = req.body
+    if (!image || !outpassId) {
+      return res.status(400).json({ message: 'Image and outpassId are required' })
+    }
 
     // Find outpass
     const outpass = await Outpass.findById(outpassId)
@@ -17,9 +22,7 @@ const verifyExit = async (req, res) => {
     }
 
     // Check outpass is approved
-    if (outpass.status !== 'approved') {
-      return res.status(400).json({ message: 'Outpass is not approved yet' })
-    }
+    if (!requireStatus(outpass, ['approved'], res, 'Outpass is not approved for exit')) return
 
     // Check outpass not expired
     if (new Date() > outpass.expiresAt) {
@@ -27,6 +30,7 @@ const verifyExit = async (req, res) => {
     }
 
     const student = outpass.studentId
+    if (!requireAssignedGateWarden(student, req, res)) return
 
     // Call FastAPI face verification
     const result = await verifyFace(image, student._id.toString(), 'student')
@@ -39,7 +43,7 @@ const verifyExit = async (req, res) => {
       type:       'exit',
       matched:    result.matched,
       confidence: result.confidence,
-      snapshot:   image
+      snapshot:   ''
     })
 
     // If face matched → update outpass
@@ -48,7 +52,7 @@ const verifyExit = async (req, res) => {
         time:       new Date(),
         matched:    true,
         confidence: result.confidence,
-        snapshot:   image
+        snapshot:   ''
       }
       outpass.status = 'out'
       await outpass.save()
@@ -79,6 +83,9 @@ const verifyExit = async (req, res) => {
 const verifyReturn = async (req, res) => {
   try {
     const { image, outpassId } = req.body
+    if (!image || !outpassId) {
+      return res.status(400).json({ message: 'Image and outpassId are required' })
+    }
 
     // Find outpass
     const outpass = await Outpass.findById(outpassId)
@@ -89,11 +96,10 @@ const verifyReturn = async (req, res) => {
     }
 
     // Check student is currently out
-    if (outpass.status !== 'out' && outpass.status !== 'late_return') {
-      return res.status(400).json({ message: 'Student has not exited yet' })
-    }
+    if (!requireStatus(outpass, ['out', 'late_return'], res, 'Student has not exited yet')) return
 
     const student = outpass.studentId
+    if (!requireAssignedGateWarden(student, req, res)) return
 
     // Call FastAPI face verification
     const result = await verifyFace(image, student._id.toString(), 'student')
@@ -106,7 +112,7 @@ const verifyReturn = async (req, res) => {
       type:       'return',
       matched:    result.matched,
       confidence: result.confidence,
-      snapshot:   image
+      snapshot:   ''
     })
 
     // If face matched → update outpass
@@ -115,7 +121,7 @@ const verifyReturn = async (req, res) => {
         time:       new Date(),
         matched:    true,
         confidence: result.confidence,
-        snapshot:   image
+        snapshot:   ''
       }
       outpass.status = 'returned'
       await outpass.save()
@@ -146,16 +152,43 @@ const verifyReturn = async (req, res) => {
 const manualOverride = async (req, res) => {
   try {
     const { outpassId, type, overrideNote } = req.body
+    if (!outpassId || !['exit', 'return'].includes(type)) {
+      return res.status(400).json({ message: 'Valid outpassId and override type are required' })
+    }
+    if (!overrideNote || !overrideNote.trim()) {
+      return res.status(400).json({ message: 'A manual override reason is required' })
+    }
 
-    const outpass = await Outpass.findById(outpassId)
+    const outpass = await Outpass.findById(outpassId).populate('studentId')
 
     if (!outpass) {
       return res.status(404).json({ message: 'Outpass not found' })
     }
+    if (!requireAssignedGateWarden(outpass.studentId, req, res)) return
+    if (type === 'exit' && !requireStatus(outpass, ['approved'], res)) return
+    if (type === 'return' && !requireStatus(outpass, ['out', 'late_return'], res)) return
+    if (type === 'exit' && new Date() > outpass.expiresAt) {
+      return res.status(409).json({ message: 'Expired outpasses cannot be overridden for exit' })
+    }
+
+    const recentFailedScan = await FaceScanLog.findOne({
+      outpassId: outpass._id,
+      scannedBy: req.user._id,
+      type,
+      matched: false,
+      manualOverride: false,
+      scannedAt: { $gte: new Date(Date.now() - 10 * 60 * 1000) }
+    }).sort({ scannedAt: -1 })
+
+    if (!recentFailedScan) {
+      return res.status(409).json({
+        message: 'A failed face scan from the last 10 minutes is required before manual override'
+      })
+    }
 
     // Update scan log with manual override
     await FaceScanLog.create({
-      studentId:      outpass.studentId,
+      studentId:      outpass.studentId._id,
       outpassId:      outpass._id,
       scannedBy:      req.user._id,
       type,
@@ -196,14 +229,48 @@ const manualOverride = async (req, res) => {
 
 
 // @route  POST /api/face/verify-parent
-// @access Public (token based)
+// @access Public (approval-link token based)
 const verifyParentFace = async (req, res) => {
   try {
-    const { image, studentId, parentIndex } = req.body
+    const { image, token } = req.body
+    if (!image || !token) {
+      return res.status(400).json({ message: 'Image and approval token are required' })
+    }
 
-    const result = await verifyFace(image, studentId, 'parent', parentIndex)
+    const outpass = await Outpass.findOne({
+      status: 'warden_forwarded',
+      parentTokens: {
+        $elemMatch: {
+          token,
+          status: 'pending',
+          expiresAt: { $gt: new Date() }
+        }
+      }
+    })
 
-    res.status(200).json(result)
+    if (!outpass) {
+      return res.status(404).json({ message: 'Approval link is invalid, expired, or already used' })
+    }
+
+    const parent = outpass.parentTokens.find(p => p.token === token)
+    const result = await verifyFace(
+      image,
+      outpass.studentId.toString(),
+      'parent',
+      parent.parentIndex ?? outpass.parentTokens.indexOf(parent)
+    )
+
+    if (!result.matched) {
+      return res.status(200).json(result)
+    }
+
+    const verificationToken = createParentVerificationToken({
+      parentToken: token,
+      outpassId: outpass._id,
+      secret: process.env.JWT_SECRET
+    })
+
+    res.status(200).json({ ...result, verificationToken })
 
   } catch (error) {
     res.status(500).json({ message: error.message })

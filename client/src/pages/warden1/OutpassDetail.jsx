@@ -23,7 +23,11 @@ export default function OutpassDetail() {
   const [success,   setSuccess]   = useState('')
   const [confirmAction, setConfirmAction] = useState(null)
 
-  useEffect(() => { fetchOutpass() }, [])
+  useEffect(() => {
+    fetchOutpass()
+    // The detail request should only rerun when the route ID changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
 
   const fetchOutpass = async () => {
     try {
@@ -34,7 +38,7 @@ export default function OutpassDetail() {
       })
       const data = await res.json()
       setOutpass(data)
-    } catch (err) {
+    } catch {
       setError('Failed to load outpass details')
     } finally {
       setLoading(false)
@@ -100,10 +104,6 @@ export default function OutpassDetail() {
   const canReject     = outpass.status === 'pending'
   const canCallApprove= outpass.status === 'warden_forwarded'
   const canCancel     = ['warden_forwarded', 'approved'].includes(outpass.status)
-
-  const respondedParent = parentTokens.find(
-    p => p.status === 'approved' || p.status === 'rejected'
-  )
 
   return (
     <div style={s.page}>

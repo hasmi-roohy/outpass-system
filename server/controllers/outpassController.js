@@ -2,18 +2,39 @@ const Outpass = require('../models/Outpass')
 const User    = require('../models/User')
 const { v4: uuidv4 } = require('uuid')
 const { sendOutpassMail, sendApprovalMailToStudent, sendRejectionMailToStudent } = require('../services/notificationService')
+const { requireAssignedWarden, requireStatus } = require('../utils/outpassGuards')
+const { verifyParentVerificationToken } = require('../utils/parentVerification')
+
+const cleanText = value => typeof value === 'string' ? value.trim() : ''
 
 // @route  POST /api/outpass/apply
 // @access Student
 const applyOutpass = async (req, res) => {
   try {
-    const { reason, destination, fromDate, toDate, fromTime, toTime } = req.body
+    const reason = cleanText(req.body.reason)
+    const destination = cleanText(req.body.destination)
+    const { fromDate, toDate, fromTime, toTime } = req.body
     const studentId = req.user._id
+
+    const departure = new Date(fromDate)
+    const returnDate = new Date(toDate)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    if (!reason || !destination || !fromDate || !toDate) {
+      return res.status(400).json({ message: 'Reason, destination, and dates are required' })
+    }
+    if (Number.isNaN(departure.getTime()) || Number.isNaN(returnDate.getTime())) {
+      return res.status(400).json({ message: 'Invalid departure or return date' })
+    }
+    if (departure < today || returnDate < departure) {
+      return res.status(400).json({ message: 'Outpass dates are invalid' })
+    }
 
     // Check active outpass
    const activeOutpass = await Outpass.findOne({
   studentId,
-  status: { $in: ['pending', 'warden_forwarded', 'approved', 'out'] }
+  status: { $in: ['pending', 'warden_forwarded', 'approved', 'out', 'late_return'] }
 })
 if (activeOutpass) {
   return res.status(400).json({ message: 'You already have an active outpass' })
@@ -141,15 +162,23 @@ const forwardToParents = async (req, res) => {
     }
     const tokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
     const student      = outpass.studentId
-    const parentTokens = student.parents.map(parent => ({
+    if (!requireAssignedWarden(outpass, req, res)) return
+    if (!requireStatus(outpass, ['pending'], res)) return
+
+    const parentTokens = student.parents.map((parent, parentIndex) => ({
       name:     parent.name,
       email:    parent.email,
       phone:    parent.phone,
       relation: parent.relation,
       token:    uuidv4(),
       status:   'pending',
-      expiresAt: tokenExpiresAt 
+      expiresAt: tokenExpiresAt,
+      parentIndex
     }))
+
+    if (parentTokens.length === 0) {
+      return res.status(400).json({ message: 'No parents are registered for this student' })
+    }
 
     outpass.wardenStatus    = 'forwarded'
     outpass.wardenNote      = wardenNote || ''
@@ -180,6 +209,8 @@ const rejectOutpass = async (req, res) => {
     if (!outpass) {
       return res.status(404).json({ message: 'Outpass not found' })
     }
+    if (!requireAssignedWarden(outpass, req, res)) return
+    if (!requireStatus(outpass, ['pending'], res)) return
 
     outpass.wardenStatus    = 'rejected'
     outpass.wardenNote      = wardenNote || ''
@@ -204,6 +235,8 @@ const cancelOutpass = async (req, res) => {
     if (!outpass) {
       return res.status(404).json({ message: 'Outpass not found' })
     }
+    if (!requireAssignedWarden(outpass, req, res)) return
+    if (!requireStatus(outpass, ['warden_forwarded', 'approved'], res)) return
 
     outpass.status                       = 'cancelled'
     outpass.wardenFinalDecision.done     = true
@@ -224,6 +257,7 @@ const cancelOutpass = async (req, res) => {
 const getOutpassByToken = async (req, res) => {
   try {
     const outpass = await Outpass.findOne({
+      status: 'warden_forwarded',
       'parentTokens.token': req.params.token
     }).populate('studentId', 'name rollNumber department')
 
@@ -248,7 +282,9 @@ const getOutpassByToken = async (req, res) => {
     message: 'This approval link has expired. Please contact the warden.'
   })
 }
-    res.status(200).json(outpass)
+    const safeOutpass = outpass.toObject()
+    delete safeOutpass.parentTokens
+    res.status(200).json(safeOutpass)
 
   } catch (error) {
     res.status(500).json({ message: error.message })
@@ -259,52 +295,81 @@ const getOutpassByToken = async (req, res) => {
 // @access Public
 const parentRespond = async (req, res) => {
   try {
-    const { status, rejectionReason } = req.body
-    const outpass = await Outpass.findOne({
-      'parentTokens.token': req.params.token
-    })
+    const { status, rejectionReason, verificationToken } = req.body
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ message: 'Response must be approved or rejected' })
+    }
+    if (!verificationToken) {
+      return res.status(401).json({ message: 'Face verification is required' })
+    }
+
+    try {
+      verifyParentVerificationToken({
+        verificationToken,
+        parentToken: req.params.token,
+        secret: process.env.JWT_SECRET
+      })
+    } catch {
+      return res.status(401).json({ message: 'Face verification expired. Please scan again.' })
+    }
+    const now = new Date()
+    const responseUpdate = {
+      'parentTokens.$.status': status,
+      'parentTokens.$.rejectionReason': cleanText(rejectionReason),
+      'parentTokens.$.respondedAt': now,
+      parentStatus: status,
+      status
+    }
+
+    if (status === 'approved') {
+      responseUpdate.parentApprovedAt = now
+    }
+
+    // The status filter makes the first valid parent response win atomically.
+    const outpass = await Outpass.findOneAndUpdate(
+      {
+        status: 'warden_forwarded',
+        parentTokens: {
+          $elemMatch: {
+            token: req.params.token,
+            status: 'pending',
+            expiresAt: { $gt: now }
+          }
+        }
+      },
+      { $set: responseUpdate },
+      { new: true }
+    )
 
     if (!outpass) {
-      return res.status(404).json({ message: 'Invalid token' })
+      return res.status(409).json({
+        message: 'This link is expired, already used, or another guardian has responded'
+      })
     }
 
     const parent = outpass.parentTokens.find(p => p.token === req.params.token)
-
-    if (parent.status !== 'pending') {
-      return res.status(400).json({ message: 'Already responded' })
-    }
-
-    parent.status          = status
-    parent.rejectionReason = rejectionReason || ''
-    parent.respondedAt     = new Date()
-
-    // Deactivate all other pending tokens
-    outpass.parentTokens.forEach(p => {
-      if (p.token !== req.params.token && p.status === 'pending') {
-        p.status = 'deactivated'
-      }
-    })
-
     if (status === 'approved') {
-      outpass.parentStatus     = 'approved'
       outpass.parentApprovedBy = parent.email
-      outpass.parentApprovedAt = new Date()
-      outpass.status           = 'approved'
+      await outpass.save()
     }
 
-    if (status === 'rejected') {
-      outpass.parentStatus = 'rejected'
+    await Outpass.updateOne(
+      { _id: outpass._id },
+      { $set: { 'parentTokens.$[other].status': 'deactivated' } },
+      {
+        arrayFilters: [{
+          'other.status': 'pending',
+          'other.token': { $ne: req.params.token }
+        }]
+      }
+    )
+
+    const student = await User.findById(outpass.studentId).select('name email')
+    if (status === 'approved') {
+      await sendApprovalMailToStudent(student, outpass, `${parent.name} (${parent.relation})`)
+    } else {
+      await sendRejectionMailToStudent(student, outpass, `${parent.name} (${parent.relation})`, rejectionReason)
     }
-
-    await outpass.save()
-
-     // Send email to student
-const student = await User.findById(outpass.studentId).select('name email')
-if (status === 'approved') {
-  await sendApprovalMailToStudent(student, outpass, `${parent.name} (${parent.relation})`)
-} else {
-  await sendRejectionMailToStudent(student, outpass, `${parent.name} (${parent.relation})`, rejectionReason)
-}
 
 
     res.status(200).json({ message: `Outpass ${status} by parent` })
@@ -324,6 +389,8 @@ const callApprove = async (req, res) => {
     if (!outpass) {
       return res.status(404).json({ message: 'Outpass not found' })
     }
+    if (!requireAssignedWarden(outpass, req, res)) return
+    if (!requireStatus(outpass, ['warden_forwarded'], res)) return
 
     outpass.parentStatus              = 'call-approved'
     outpass.status                    = 'approved'
@@ -356,7 +423,8 @@ const getOutpassByRollNumber = async (req, res) => {
   try {
     const student = await User.findOne({
       rollNumber: req.params.rollNumber,
-      role:       'student'
+      role:       'student',
+      warden2Id:  req.user._id
     })
 
     if (!student) {
@@ -413,6 +481,8 @@ const getSingleOutpass = async (req, res) => {
     if (!outpass) {
       return res.status(404).json({ message: 'Outpass not found' })
     }
+
+    if (req.user.role === 'warden1' && !requireAssignedWarden(outpass, req, res)) return
 
     res.status(200).json(outpass)
 

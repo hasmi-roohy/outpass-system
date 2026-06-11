@@ -12,7 +12,8 @@ const parentTokenSchema = new mongoose.Schema({
   status:          { type: String, enum: ['pending', 'approved', 'rejected', 'deactivated'], default: 'pending' },
   rejectionReason: { type: String, default: '' },
   respondedAt:     { type: Date },
-  expiresAt:       { type: Date }   // ← token expiry
+  expiresAt:       { type: Date },
+  parentIndex:     { type: Number }
 }, { _id: false })
 
 // ─────────────────────────────────────

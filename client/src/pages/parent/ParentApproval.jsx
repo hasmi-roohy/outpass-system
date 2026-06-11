@@ -20,10 +20,13 @@ export default function ParentApproval() {
   const [faceResult,   setFaceResult]   = useState(null)
   const [scanning,     setScanning]     = useState(false)
   const [faceVerified, setFaceVerified] = useState(false)
+  const [verificationToken, setVerificationToken] = useState('')
   const [step,         setStep]         = useState('details')
 
   useEffect(() => {
     if (token) fetchOutpass()
+    // The request should only rerun when the approval-link token changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
   // Add viewport meta for mobile
@@ -59,7 +62,7 @@ export default function ParentApproval() {
       videoRef.current.srcObject = stream
       videoRef.current.play()
       setStreaming(true)
-    } catch (err) {
+    } catch {
       alert('Camera access denied. Please allow camera access in your browser settings.')
     }
   }
@@ -82,29 +85,12 @@ export default function ParentApproval() {
       canvas.getContext('2d').drawImage(video, 0, 0)
       const image = canvas.toDataURL('image/jpeg')
 
-      const parentToken = outpass.parentTokens.find(p => p.token === token)
-      if (!parentToken) {
-        setFaceResult({ matched: false, message: 'Invalid parent token' })
-        setScanning(false)
-        return
-      }
-      const parentIndex = outpass.parentTokens.indexOf(parentToken)
-
-      const studentId = outpass.studentId?._id
-        ? outpass.studentId._id.toString()
-        : outpass.studentId?.toString()
-
-      if (!studentId) {
-        setFaceResult({ matched: false, message: 'Student ID not found' })
-        setScanning(false)
-        return
-      }
-
-      const res = await verifyParentFaceApi({ image, studentId, parentIndex })
+      const res = await verifyParentFaceApi({ image, token })
       const result = res.data
       setFaceResult(result)
 
-      if (result.matched) {
+      if (result.matched && result.verificationToken) {
+        setVerificationToken(result.verificationToken)
         setFaceVerified(true)
         stopCamera()
         setStep('respond')
@@ -123,7 +109,11 @@ export default function ParentApproval() {
   const handleRespond = async (status) => {
     setActing(true)
     try {
-      await parentRespondApi(token, { status, rejectionReason: reason })
+      await parentRespondApi(token, {
+        status,
+        rejectionReason: reason,
+        verificationToken
+      })
       setResponded(true)
       setMessage(
         status === 'approved'

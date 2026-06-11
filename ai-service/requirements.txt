@@ -8,3 +8,5 @@ numpy
 python-multipart
 tf-keras
 requests
+cloudinary
+python-dotenv

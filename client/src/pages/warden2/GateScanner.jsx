@@ -67,7 +67,7 @@ export default function GateScanner() {
       videoRef.current.srcObject = stream
       videoRef.current.play()
       setStreaming(true)
-    } catch (err) {
+    } catch {
       alert('Camera access denied.')
     }
   }
@@ -125,7 +125,7 @@ export default function GateScanner() {
       })
       setOverrideDone(true)
       setResult({ matched: true, message: '✅ Manual override applied successfully' })
-    } catch (err) {
+    } catch {
       alert('Override failed. Please try again.')
     }
   }

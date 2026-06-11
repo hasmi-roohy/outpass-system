@@ -13,7 +13,7 @@ export default function WebcamCapture({ onCapture }) {
       videoRef.current.play()
       setStreaming(true)
       setCaptured(null)
-    } catch (err) {
+    } catch {
       alert('Camera access denied. Please allow camera access.')
     }
   }

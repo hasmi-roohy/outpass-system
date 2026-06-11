@@ -41,7 +41,7 @@ export default function ChatWindow() {
         text: res.data.reply,
         time: new Date()
       }])
-    } catch (err) {
+    } catch {
       setMessages([...newMessages, {
         from: 'bot',
         text: 'Sorry, I am having trouble connecting. Please try again.',

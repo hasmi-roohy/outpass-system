@@ -121,6 +121,12 @@ Install the following before running the project:
 
 ## Environment Variables
 
+Copy `client/.env.example` to `client/.env`:
+
+```env
+VITE_API_URL=http://localhost:5000/api
+```
+
 Create `server/.env`:
 
 ```env
@@ -168,7 +174,6 @@ cd ..\ai-service
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-pip install cloudinary python-dotenv
 ```
 
 ## Running the Application
@@ -217,6 +222,34 @@ The Express server runs scheduled checks to:
 - Mark approved outpasses as expired after their expiry time
 - Mark students who have not returned by the expiry time as late returns
 
+## Security Safeguards
+
+- Warden 1 can only act on outpasses assigned to them
+- Gate wardens can only scan students assigned to them
+- Workflow actions enforce valid status transitions
+- Parent face verification is bound to the unique approval link
+- Parent face-verification proofs expire after five minutes
+- The first valid parent response wins atomically
+- Manual overrides require an assigned gate warden, a valid status, a reason,
+  and a failed face scan from the previous ten minutes
+- Raw gate scan snapshots are not stored in MongoDB
+
+## Verification
+
+Run frontend lint:
+
+```powershell
+cd client
+npm run lint
+```
+
+Run backend tests:
+
+```powershell
+cd server
+npm test
+```
+
 ## Security Before Pushing to GitHub
 
 The current project contains local environment files and generated face data.
@@ -246,7 +279,8 @@ publishing the repository.
 - Face recognition quality depends on lighting, camera quality, and the
   registered reference image.
 - Email delivery depends on Gmail credentials and sending limits.
-- Automated tests have not yet been added.
+- Workflow security tests are included, but full API integration and browser
+  end-to-end test coverage should still be added.
 
 ## License
 
