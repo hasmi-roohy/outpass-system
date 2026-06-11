@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+deepface
+opencv-python
+scikit-learn
+nltk
+numpy
+python-multipart
+tf-keras
+requests

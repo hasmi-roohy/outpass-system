@@ -1,0 +1,95 @@
+{
+  "intents": [
+    {
+      "tag": "greeting",
+      "patterns": [
+        "hi", "hello", "hey", "good morning",
+        "good evening", "what's up", "howdy"
+      ],
+      "response": "Hello! I am your outpass assistant. How can I help you today?"
+    },
+    {
+      "tag": "apply_outpass",
+      "patterns": [
+        "how to apply outpass",
+        "how do I request outpass",
+        "steps to apply outpass",
+        "I want to go out",
+        "how can I leave campus",
+        "outpass apply process",
+        "how to get outpass"
+      ],
+      "response": "To apply for an outpass: Go to Apply Outpass section, fill in your reason, destination, from date and to date. Your warden will review it and forward to your parents for approval."
+    },
+    {
+      "tag": "check_status",
+      "patterns": [
+        "what is my outpass status",
+        "where is my request",
+        "did warden approve my outpass",
+        "is my outpass approved",
+        "status of my outpass",
+        "check my outpass",
+        "what happened to my request"
+      ],
+      "response": "FETCH_STATUS"
+    },
+    {
+      "tag": "college_rules",
+      "patterns": [
+        "what are outpass rules",
+        "when can I apply outpass",
+        "outpass timings",
+        "how many outpass allowed",
+        "college leave policy",
+        "outpass limit",
+        "maximum outpass per month"
+      ],
+      "response": "Outpass Rules: You can apply maximum 2 outpasses per month. You cannot apply if you already have an active outpass. Outpass expires at end of your return date. Make sure to do face scan at gate when leaving and returning."
+    },
+    {
+      "tag": "message_warden",
+      "patterns": [
+        "tell warden I am sick",
+        "inform warden",
+        "send message to warden",
+        "let warden know",
+        "message warden",
+        "contact warden",
+        "notify warden"
+      ],
+      "response": "SEND_WARDEN_MESSAGE"
+    },
+    {
+      "tag": "face_scan",
+      "patterns": [
+        "how does face scan work",
+        "what is face scan",
+        "face recognition at gate",
+        "biometric scan",
+        "how to scan face at gate",
+        "face scan process"
+      ],
+      "response": "When your outpass is approved, go to the gate. Warden 2 will scan your face using the webcam. If your face matches, your exit will be logged. Do the same when you return to campus."
+    },
+    {
+      "tag": "parent_approval",
+      "patterns": [
+        "why do parents need to approve",
+        "parent approval process",
+        "how parents get notified",
+        "parent mail",
+        "what happens after warden approves"
+      ],
+      "response": "After warden reviews your request, emails are sent to all 4 of your registered guardians. Any one of them can approve or reject. Once approved your outpass is granted."
+    },
+    {
+      "tag": "goodbye",
+      "patterns": [
+        "bye", "goodbye", "see you",
+        "thanks", "thank you", "that's all"
+      ],
+      "response": "Goodbye! Stay safe and return on time!"
+    }
+  ]
+}

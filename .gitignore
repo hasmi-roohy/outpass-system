@@ -1,0 +1,29 @@
+# Environment variables and secrets
+.env
+**/.env
+
+# JavaScript dependencies and builds
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+**/build/
+
+# Python environments and generated files
+venv/
+**/venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Face images and temporary scans
+**/face/known_faces/
+**/face/temp/
+**/face/temp_scan.jpg
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
