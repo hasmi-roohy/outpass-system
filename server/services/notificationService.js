@@ -1,101 +1,129 @@
 const nodemailer = require('nodemailer')
 
+const emailPassword = (process.env.EMAIL_PASS || '').replace(/\s/g, '')
+const rejectUnauthorized = process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false'
+
+const escapeHtml = value => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;')
+
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+    pass: emailPassword
   },
   tls: {
-    rejectUnauthorized: false
+    rejectUnauthorized
   }
 })
 
-// ─────────────────────────────────────
-// Email to parents when warden forwards
-// ─────────────────────────────────────
+const formatDate = value => new Date(value).toDateString()
+const formatDateTime = value => new Date(value).toLocaleString()
+const getServerUrl = () =>
+  (process.env.SERVER_URL || process.env.API_URL || `http://localhost:${process.env.PORT || 5000}`)
+    .replace(/\/$/, '')
+
+const baseEmail = ({ title, subtitle, body, footer = 'This email was sent by the College Outpass Management System.' }) => `
+  <div style="font-family: Segoe UI, Arial, sans-serif; max-width: 620px; margin: 0 auto; background: #f4f7fb; padding: 20px;">
+    <div style="background: #2563eb; padding: 28px; border-radius: 12px 12px 0 0; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 24px;">${title}</h1>
+      <p style="color: rgba(255,255,255,0.84); margin: 8px 0 0; font-size: 14px;">${subtitle}</p>
+    </div>
+    <div style="background: #ffffff; padding: 28px; border-radius: 0 0 12px 12px; box-shadow: 0 8px 24px rgba(15,23,42,0.08);">
+      ${body}
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;" />
+      <p style="color: #94a3b8; font-size: 12px; text-align: center; margin: 0;">${footer}</p>
+    </div>
+  </div>
+`
+
+const requestDetailsTable = ({ student, outpass, wardenNote }) => `
+  <div style="background: #f8fafc; border-left: 4px solid #2563eb; border-radius: 8px; padding: 18px; margin: 20px 0;">
+    <h3 style="color: #2563eb; margin: 0 0 14px; font-size: 16px;">Request Details</h3>
+    <table style="width: 100%; border-collapse: collapse;">
+      <tr>
+        <td style="padding: 8px 0; color: #64748b; font-size: 14px; width: 38%;">Student</td>
+        <td style="padding: 8px 0; color: #172033; font-size: 14px; font-weight: 700;">${escapeHtml(student.name)} (${escapeHtml(student.rollNumber || 'N/A')})</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; color: #64748b; font-size: 14px;">Reason</td>
+        <td style="padding: 8px 0; color: #172033; font-size: 14px;">${escapeHtml(outpass.reason)}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; color: #64748b; font-size: 14px;">Destination</td>
+        <td style="padding: 8px 0; color: #172033; font-size: 14px;">${escapeHtml(outpass.destination)}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; color: #64748b; font-size: 14px;">From Date</td>
+        <td style="padding: 8px 0; color: #172033; font-size: 14px;">${formatDate(outpass.fromDate)}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; color: #64748b; font-size: 14px;">To Date</td>
+        <td style="padding: 8px 0; color: #172033; font-size: 14px;">${formatDate(outpass.toDate)}</td>
+      </tr>
+      ${outpass.wardenNote ? `
+        <tr>
+          <td style="padding: 8px 0; color: #64748b; font-size: 14px;">Warden Note</td>
+          <td style="padding: 8px 0; color: #172033; font-size: 14px;">${wardenNote}</td>
+        </tr>
+      ` : ''}
+    </table>
+  </div>
+`
+
 const sendOutpassMail = async (student, outpass, parentTokens) => {
   try {
     const emailPromises = parentTokens.map(parent => {
       if (!parent.email || parent.email.trim() === '') {
-        console.log(`⚠️ Skipping ${parent.name} — no email provided`)
+        console.log(`Skipped: ${parent.name} - no email provided`)
         return Promise.resolve({ skipped: true, name: parent.name })
       }
 
-      const approveLink = `${process.env.CLIENT_URL}/parent/approve?token=${parent.token}`
+      const approveLink = `${getServerUrl()}/api/outpass/parent/${parent.token}/approve-direct`
+      const rejectLink = `${getServerUrl()}/api/outpass/parent/${parent.token}/reject-direct`
+      const parentName = escapeHtml(parent.name)
 
-      const mailOptions = {
-        from:    `"College Outpass System" <${process.env.EMAIL_USER}>`,
-        to:      parent.email,
-        subject: `Outpass Request — ${student.name} (${student.rollNumber})`,
-        html: `
-          <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8f9fa; padding: 20px;">
-            
-            <div style="background: linear-gradient(135deg, #4f46e5, #7c3aed); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-              <h1 style="color: #fff; margin: 0; font-size: 24px;">🎓 Outpass Request</h1>
-              <p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 14px;">Action required from you</p>
-            </div>
+      const body = `
+        <p style="color: #334155; font-size: 15px;">Dear <strong>${parentName}</strong>,</p>
+        <p style="color: #334155; font-size: 15px;">
+          Your ward <strong style="color: #2563eb;">${escapeHtml(student.name)}</strong> has submitted an outpass request.
+        </p>
 
-            <div style="background: #fff; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.08);">
-              
-              <p style="color: #555; font-size: 15px;">Dear <strong>${parent.name}</strong>,</p>
-              <p style="color: #555; font-size: 15px;">Your ward <strong style="color: #4f46e5;">${student.name}</strong> has submitted an outpass request that requires your approval.</p>
+        ${requestDetailsTable({
+          student,
+          outpass,
+          wardenNote: escapeHtml(outpass.wardenNote)
+        })}
 
-              <div style="background: #f8f9ff; border-left: 4px solid #4f46e5; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                <h3 style="color: #4f46e5; margin: 0 0 16px; font-size: 16px;">📋 Request Details</h3>
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 8px 0; color: #888; font-size: 14px; width: 40%;">Student</td>
-                    <td style="padding: 8px 0; color: #333; font-size: 14px; font-weight: 600;">${student.name} (${student.rollNumber})</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #888; font-size: 14px;">Reason</td>
-                    <td style="padding: 8px 0; color: #333; font-size: 14px;">${outpass.reason}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #888; font-size: 14px;">Destination</td>
-                    <td style="padding: 8px 0; color: #333; font-size: 14px;">${outpass.destination}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #888; font-size: 14px;">From Date</td>
-                    <td style="padding: 8px 0; color: #333; font-size: 14px;">${new Date(outpass.fromDate).toDateString()}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #888; font-size: 14px;">To Date</td>
-                    <td style="padding: 8px 0; color: #333; font-size: 14px;">${new Date(outpass.toDate).toDateString()}</td>
-                  </tr>
-                  ${outpass.wardenNote ? `
-                  <tr>
-                    <td style="padding: 8px 0; color: #888; font-size: 14px;">Warden Note</td>
-                    <td style="padding: 8px 0; color: #333; font-size: 14px;">${outpass.wardenNote}</td>
-                  </tr>` : ''}
-                </table>
-              </div>
+        <div style="text-align: center; margin: 28px 0 12px;">
+          <a href="${approveLink}" style="display: inline-block; background: #16a34a; color: #ffffff; padding: 14px 26px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: 800; margin: 6px;">
+            Approve Request
+          </a>
+          <a href="${rejectLink}" style="display: inline-block; background: #dc2626; color: #ffffff; padding: 14px 26px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: 800; margin: 6px;">
+            Decline Request
+          </a>
+        </div>
 
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${approveLink}" 
-                   style="display: inline-block; background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff; padding: 14px 40px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold; letter-spacing: 0.5px;">
-                  👉 View & Respond to Request
-                </a>
-              </div>
+        <p style="color: #64748b; font-size: 13px; text-align: center;">
+          Approve grants the outpass immediately. Decline rejects the outpass immediately.
+          These buttons are unique to you and expire after the request is completed or the link expires.
+        </p>
+      `
 
-              <p style="color: #888; font-size: 13px; text-align: center;">
-                You will need to verify your identity via face scan before responding.<br/>
-                This link is unique to you and will expire once someone responds.
-              </p>
-
-              <hr style="border: none; border-top: 1px solid #f0f0f0; margin: 24px 0;" />
-
-              <p style="color: #aaa; font-size: 12px; text-align: center; margin: 0;">
-                This email was sent by the College Outpass Management System.<br/>
-                Please do not reply to this email.
-              </p>
-            </div>
-          </div>
-        `
-      }
-
-      return transporter.sendMail(mailOptions)
+      return transporter.sendMail({
+        from: `"College Outpass System" <${process.env.EMAIL_USER}>`,
+        to: parent.email,
+        subject: `Outpass Request - ${student.name} (${student.rollNumber})`,
+        html: baseEmail({
+          title: 'Outpass Request',
+          subtitle: 'Action required from you',
+          body
+        })
+      })
     })
 
     const results = await Promise.allSettled(emailPromises)
@@ -104,148 +132,96 @@ const sendOutpassMail = async (student, outpass, parentTokens) => {
       const parent = parentTokens[index]
       if (result.status === 'fulfilled') {
         if (result.value?.skipped) {
-          console.log(`⚠️ Skipped: ${parent.name} — no email`)
+          console.log(`Skipped: ${parent.name} - no email`)
         } else {
-          console.log(`✅ Email sent to: ${parent.name} (${parent.email})`)
+          console.log(`Email sent to: ${parent.name} (${parent.email})`)
         }
       } else {
-        console.log(`❌ Failed: ${parent.name} — ${result.reason?.message}`)
+        console.log(`Failed: ${parent.name} - ${result.reason?.message}`)
       }
     })
 
+    return results.reduce((summary, result) => {
+      if (result.status === 'rejected') summary.failed += 1
+      else if (result.value?.skipped) summary.skipped += 1
+      else summary.sent += 1
+      return summary
+    }, { sent: 0, skipped: 0, failed: 0 })
   } catch (error) {
-    console.log('❌ Notification error:', error.message)
+    console.log('Notification error:', error.message)
+    return { sent: 0, skipped: 0, failed: parentTokens.length }
   }
 }
 
-// ─────────────────────────────────────
-// Email to student when outpass approved
-// ─────────────────────────────────────
 const sendApprovalMailToStudent = async (student, outpass, approvedBy) => {
   try {
     if (!student.email) return
 
-    const mailOptions = {
-      from:    `"College Outpass System" <${process.env.EMAIL_USER}>`,
-      to:      student.email,
-      subject: `✅ Your Outpass Has Been Approved!`,
-      html: `
-        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8f9fa; padding: 20px;">
+    const body = `
+      <p style="color: #334155; font-size: 15px;">Dear <strong>${escapeHtml(student.name)}</strong>,</p>
+      <p style="color: #334155; font-size: 15px;">
+        Your outpass request has been <strong style="color: #16a34a;">approved</strong> by ${escapeHtml(approvedBy)}.
+      </p>
+      ${requestDetailsTable({ student, outpass, wardenNote: escapeHtml(outpass.wardenNote) })}
+      <div style="background: #fff7ed; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="color: #9a3412; font-size: 14px; margin: 0;">
+          Important: Report to the gate before expiry. Face scan is required when leaving and returning to campus.
+        </p>
+      </div>
+      <p style="color: #64748b; font-size: 14px;">
+        Expires at: <strong>${formatDateTime(outpass.expiresAt)}</strong>
+      </p>
+    `
 
-          <div style="background: linear-gradient(135deg, #16a34a, #15803d); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-            <div style="font-size: 48px; margin-bottom: 8px;">✅</div>
-            <h1 style="color: #fff; margin: 0; font-size: 24px;">Outpass Approved!</h1>
-            <p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 14px;">Your request has been approved</p>
-          </div>
-
-          <div style="background: #fff; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.08);">
-            
-            <p style="color: #555; font-size: 15px;">Dear <strong>${student.name}</strong>,</p>
-            <p style="color: #555; font-size: 15px;">Great news! Your outpass request has been <strong style="color: #16a34a;">approved</strong> by ${approvedBy}.</p>
-
-            <div style="background: #f0fff4; border-left: 4px solid #16a34a; border-radius: 8px; padding: 20px; margin: 20px 0;">
-              <h3 style="color: #16a34a; margin: 0 0 16px; font-size: 16px;">📋 Approved Outpass Details</h3>
-              <table style="width: 100%; border-collapse: collapse;">
-                <tr>
-                  <td style="padding: 8px 0; color: #888; font-size: 14px; width: 40%;">Destination</td>
-                  <td style="padding: 8px 0; color: #333; font-size: 14px; font-weight: 600;">${outpass.destination}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #888; font-size: 14px;">Reason</td>
-                  <td style="padding: 8px 0; color: #333; font-size: 14px;">${outpass.reason}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #888; font-size: 14px;">From Date</td>
-                  <td style="padding: 8px 0; color: #333; font-size: 14px;">${new Date(outpass.fromDate).toDateString()}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #888; font-size: 14px;">To Date</td>
-                  <td style="padding: 8px 0; color: #333; font-size: 14px;">${new Date(outpass.toDate).toDateString()}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #888; font-size: 14px;">Expires At</td>
-                  <td style="padding: 8px 0; color: #dc2626; font-size: 14px; font-weight: 600;">${new Date(outpass.expiresAt).toLocaleString()}</td>
-                </tr>
-              </table>
-            </div>
-
-            <div style="background: #fff3cd; border-radius: 8px; padding: 16px; margin: 20px 0;">
-              <p style="color: #856404; font-size: 14px; margin: 0;">
-                ⚠️ <strong>Important:</strong> Please report to the gate before your outpass expires. 
-                You must complete the face scan at the gate when leaving and returning to campus.
-              </p>
-            </div>
-
-            <hr style="border: none; border-top: 1px solid #f0f0f0; margin: 24px 0;" />
-
-            <p style="color: #aaa; font-size: 12px; text-align: center; margin: 0;">
-              This email was sent by the College Outpass Management System.<br/>
-              Please do not reply to this email.
-            </p>
-          </div>
-        </div>
-      `
-    }
-
-    await transporter.sendMail(mailOptions)
-    console.log(`✅ Approval email sent to student: ${student.email}`)
-
+    await transporter.sendMail({
+      from: `"College Outpass System" <${process.env.EMAIL_USER}>`,
+      to: student.email,
+      subject: 'Your Outpass Has Been Approved',
+      html: baseEmail({
+        title: 'Outpass Approved',
+        subtitle: 'Your request has been approved',
+        body
+      })
+    })
+    console.log(`Approval email sent to student: ${student.email}`)
   } catch (error) {
-    console.log('❌ Student approval email error:', error.message)
+    console.log('Student approval email error:', error.message)
   }
 }
 
-// ─────────────────────────────────────
-// Email to student when outpass rejected
-// ─────────────────────────────────────
 const sendRejectionMailToStudent = async (student, outpass, rejectedBy, reason) => {
   try {
     if (!student.email) return
 
-    const mailOptions = {
-      from:    `"College Outpass System" <${process.env.EMAIL_USER}>`,
-      to:      student.email,
-      subject: `❌ Your Outpass Request Was Rejected`,
-      html: `
-        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8f9fa; padding: 20px;">
-
-          <div style="background: linear-gradient(135deg, #dc2626, #b91c1c); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
-            <div style="font-size: 48px; margin-bottom: 8px;">❌</div>
-            <h1 style="color: #fff; margin: 0; font-size: 24px;">Outpass Rejected</h1>
-            <p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 14px;">Your request was not approved</p>
-          </div>
-
-          <div style="background: #fff; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.08);">
-            
-            <p style="color: #555; font-size: 15px;">Dear <strong>${student.name}</strong>,</p>
-            <p style="color: #555; font-size: 15px;">Unfortunately, your outpass request to <strong>${outpass.destination}</strong> has been <strong style="color: #dc2626;">rejected</strong> by ${rejectedBy}.</p>
-
-            ${reason ? `
-            <div style="background: #fff0f0; border-left: 4px solid #dc2626; border-radius: 8px; padding: 16px; margin: 20px 0;">
-              <p style="color: #7f1d1d; font-size: 14px; margin: 0;">
-                <strong>Reason:</strong> ${reason}
-              </p>
-            </div>` : ''}
-
-            <p style="color: #555; font-size: 14px;">
-              If you have questions, please contact your warden directly.
-            </p>
-
-            <hr style="border: none; border-top: 1px solid #f0f0f0; margin: 24px 0;" />
-
-            <p style="color: #aaa; font-size: 12px; text-align: center; margin: 0;">
-              This email was sent by the College Outpass Management System.
-            </p>
-          </div>
+    const body = `
+      <p style="color: #334155; font-size: 15px;">Dear <strong>${escapeHtml(student.name)}</strong>,</p>
+      <p style="color: #334155; font-size: 15px;">
+        Your outpass request to <strong>${escapeHtml(outpass.destination)}</strong> was
+        <strong style="color: #dc2626;">rejected</strong> by ${escapeHtml(rejectedBy)}.
+      </p>
+      ${reason ? `
+        <div style="background: #fef2f2; border-left: 4px solid #dc2626; border-radius: 8px; padding: 16px; margin: 20px 0;">
+          <p style="color: #7f1d1d; font-size: 14px; margin: 0;">
+            <strong>Reason:</strong> ${escapeHtml(reason)}
+          </p>
         </div>
-      `
-    }
+      ` : ''}
+      <p style="color: #64748b; font-size: 14px;">Please contact your warden if you have questions.</p>
+    `
 
-    await transporter.sendMail(mailOptions)
-    console.log(`✅ Rejection email sent to student: ${student.email}`)
-
+    await transporter.sendMail({
+      from: `"College Outpass System" <${process.env.EMAIL_USER}>`,
+      to: student.email,
+      subject: 'Your Outpass Request Was Rejected',
+      html: baseEmail({
+        title: 'Outpass Rejected',
+        subtitle: 'Your request was not approved',
+        body
+      })
+    })
+    console.log(`Rejection email sent to student: ${student.email}`)
   } catch (error) {
-    console.log('❌ Student rejection email error:', error.message)
+    console.log('Student rejection email error:', error.message)
   }
 }
 

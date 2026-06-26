@@ -1,4 +1,5 @@
 const mongoose = require('mongoose')
+const ACTIVE_OUTPASS_STATUSES = ['pending', 'warden_forwarded', 'approved', 'out', 'late_return']
 
 // ─────────────────────────────────────
 // Parent Token Schema
@@ -91,6 +92,14 @@ const outpassSchema = new mongoose.Schema({
 // Indexes — speeds up frequent queries
 // ─────────────────────────────────────
 outpassSchema.index({ studentId: 1, status: 1 })
+outpassSchema.index(
+  { studentId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: { $in: ACTIVE_OUTPASS_STATUSES } },
+    name: 'one_active_outpass_per_student'
+  }
+)
 outpassSchema.index({ warden1Id: 1, status: 1 })
 outpassSchema.index({ warden1Id: 1, wardenStatus: 1 })
 outpassSchema.index({ 'parentTokens.token': 1 })

@@ -2,7 +2,6 @@ const Outpass = require('../models/Outpass')
 const FaceScanLog = require('../models/FaceScanLog')
 const { verifyFace } = require('../services/faceService')
 const { requireAssignedGateWarden, requireStatus } = require('../utils/outpassGuards')
-const { createParentVerificationToken } = require('../utils/parentVerification')
 
 // @route  POST /api/face/verify-exit
 // @access Warden2
@@ -228,57 +227,7 @@ const manualOverride = async (req, res) => {
 
 
 
-// @route  POST /api/face/verify-parent
-// @access Public (approval-link token based)
-const verifyParentFace = async (req, res) => {
-  try {
-    const { image, token } = req.body
-    if (!image || !token) {
-      return res.status(400).json({ message: 'Image and approval token are required' })
-    }
-
-    const outpass = await Outpass.findOne({
-      status: 'warden_forwarded',
-      parentTokens: {
-        $elemMatch: {
-          token,
-          status: 'pending',
-          expiresAt: { $gt: new Date() }
-        }
-      }
-    })
-
-    if (!outpass) {
-      return res.status(404).json({ message: 'Approval link is invalid, expired, or already used' })
-    }
-
-    const parent = outpass.parentTokens.find(p => p.token === token)
-    const result = await verifyFace(
-      image,
-      outpass.studentId.toString(),
-      'parent',
-      parent.parentIndex ?? outpass.parentTokens.indexOf(parent)
-    )
-
-    if (!result.matched) {
-      return res.status(200).json(result)
-    }
-
-    const verificationToken = createParentVerificationToken({
-      parentToken: token,
-      outpassId: outpass._id,
-      secret: process.env.JWT_SECRET
-    })
-
-    res.status(200).json({ ...result, verificationToken })
-
-  } catch (error) {
-    res.status(500).json({ message: error.message })
-  }
-}
-
-// Add to exports
-module.exports = { verifyExit, verifyReturn, manualOverride, verifyParentFace }
+module.exports = { verifyExit, verifyReturn, manualOverride }
 
 
 

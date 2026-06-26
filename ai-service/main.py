@@ -1,31 +1,45 @@
-from fastapi import FastAPI
+import os
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import dotenv_values
+from fastapi.responses import JSONResponse
+from dotenv import load_dotenv
 from routes import face, chat
 
-# Load env
-config = dotenv_values(".env")
+load_dotenv()
 
-# Create FastAPI app
+express_url = os.getenv("EXPRESS_URL", "http://localhost:5000")
+ai_service_api_key = os.getenv("AI_SERVICE_API_KEY", "")
+
 app = FastAPI(
     title="Outpass AI Service",
     description="Face Recognition + Chatbot API",
     version="1.0.0"
 )
 
-# Allow Express to talk to FastAPI
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[express_url],
     allow_methods=["*"],
     allow_headers=["*"]
 )
 
-# Register routes
+
+@app.middleware("http")
+async def require_internal_api_key(request: Request, call_next):
+    if ai_service_api_key and request.url.path != "/":
+        provided_key = request.headers.get("x-ai-service-key", "")
+        if provided_key != ai_service_api_key:
+            return JSONResponse(
+                status_code=401,
+                content={"message": "Unauthorized AI service request"}
+            )
+    return await call_next(request)
+
+
 app.include_router(face.router, prefix="/face", tags=["Face Recognition"])
 app.include_router(chat.router, prefix="/chat", tags=["Chatbot"])
 
-# Health check
+
 @app.get("/")
 def root():
-    return { "message": "✅ AI Service is running" }
+    return {"message": "AI Service is running"}

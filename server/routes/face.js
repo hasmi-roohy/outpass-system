@@ -3,8 +3,7 @@ const router  = express.Router()
 const {
   verifyExit,
   verifyReturn,
-  manualOverride,
-  verifyParentFace
+  manualOverride
 } = require('../controllers/faceController')
 const { protect, authorizeRoles } = require('../middleware/authMiddleware')
 
@@ -14,6 +13,4 @@ router.post('/verify-return',   protect, authorizeRoles('warden2'), verifyReturn
 router.post('/manual-override', protect, authorizeRoles('warden2'), manualOverride)
 
 // Public — parent face verify (no login needed)
-router.post('/verify-parent', verifyParentFace)
-
 module.exports = router

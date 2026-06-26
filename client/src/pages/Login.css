@@ -1,5 +1,29 @@
-@media (max-width: 768px) {
-  .login-left {
-    display: none !important;
+@media (max-width: 900px) {
+.login-page {
+    grid-template-columns: 1fr !important;
+  }
+
+  .login-visual {
+    min-height: 38vh !important;
+    padding: 32px !important;
+    align-items: flex-end !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .login-visual {
+    padding: 24px !important;
+  }
+
+  .login-visual h1 {
+    font-size: 34px !important;
+  }
+
+  .login-visual p {
+    font-size: 15px !important;
+  }
+
+  .login-feature-grid {
+    grid-template-columns: 1fr !important;
   }
 }

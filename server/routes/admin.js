@@ -1,7 +1,7 @@
 const express = require('express')
 const router  = express.Router()
 const {
-  getAllStudents, addStudent, editStudent, deleteStudent,
+  getAllStudents, getStudentById, addStudent, editStudent, deleteStudent,
   getAllWarden1s, addWarden1, editWarden1, deleteWarden1,
   getAllWarden2s, addWarden2, editWarden2, deleteWarden2,
   getAllAdmins,   addAdmin,   editAdmin,   deleteAdmin,
@@ -22,6 +22,7 @@ router.get('/', ...adminOnly, getDashboardStats)
 // STUDENTS
 // ─────────────────────────────────────
 router.get('/students',                          ...adminOnly, getAllStudents)
+router.get('/students/:id',                      ...adminOnly, getStudentById)
 router.post('/students',                         ...adminOnly, addStudent)
 router.put('/students/:id',                      ...adminOnly, editStudent)
 router.delete('/students/:id',                   ...adminOnly, deleteStudent)

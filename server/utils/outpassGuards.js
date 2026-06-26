@@ -1,5 +1,10 @@
+const idString = value => {
+  const id = value?._id ?? value
+  return id?.toString()
+}
+
 const isAssignedWarden = (outpass, userId) =>
-  outpass.warden1Id?.toString() === userId?.toString()
+  idString(outpass.warden1Id) === idString(userId)
 
 const requireAssignedWarden = (outpass, req, res) => {
   if (!isAssignedWarden(outpass, req.user?._id)) {
@@ -10,7 +15,7 @@ const requireAssignedWarden = (outpass, req, res) => {
 }
 
 const requireAssignedGateWarden = (student, req, res) => {
-  if (!student.warden2Id || student.warden2Id.toString() !== req.user?._id?.toString()) {
+  if (!student.warden2Id || idString(student.warden2Id) !== idString(req.user?._id)) {
     res.status(403).json({ message: 'This student is not assigned to you' })
     return false
   }

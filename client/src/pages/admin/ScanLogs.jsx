@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Navbar from '../../components/Navbar'
 import { getAllScanLogsApi } from '../../api/api'
 
@@ -9,37 +9,34 @@ export default function ScanLogs() {
   const [filterType,   setFilterType]   = useState('all')
   const [filterMatch,  setFilterMatch]  = useState('all')
   const [expandedId,   setExpandedId]   = useState(null)
+  const [page,         setPage]         = useState(1)
+  const [pagination,   setPagination]   = useState(null)
 
-  useEffect(() => { fetchLogs() }, [])
-
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     try {
-      const res = await getAllScanLogsApi()
-      setLogs(res.data)
+      setLoading(true)
+      const res = await getAllScanLogsApi({
+        page,
+        limit: 20,
+        search,
+        type: filterType,
+        match: filterMatch
+      })
+      setLogs(res.data.items || res.data)
+      setPagination(res.data.pagination || null)
     } catch (err) {
       console.log(err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [page, search, filterType, filterMatch])
 
-  const filtered = logs.filter(log => {
-    const matchSearch = search === '' ||
-      log.studentId?.name?.toLowerCase().includes(search.toLowerCase()) ||
-      log.studentId?.rollNumber?.toLowerCase().includes(search.toLowerCase())
+  useEffect(() => { fetchLogs() }, [fetchLogs])
 
-    const matchType  = filterType  === 'all' || log.type === filterType
-    const matchMatch = filterMatch === 'all'
-      ? true
-      : filterMatch === 'matched'
-      ? log.matched
-      : !log.matched
-
-    return matchSearch && matchType && matchMatch
-  })
+  const filtered = logs
 
   const stats = {
-    total:    logs.length,
+    total:    pagination?.total ?? logs.length,
     exit:     logs.filter(l => l.type === 'exit').length,
     return:   logs.filter(l => l.type === 'return').length,
     matched:  logs.filter(l => l.matched).length,
@@ -66,7 +63,7 @@ export default function ScanLogs() {
         <div style={s.pageHeader}>
           <div>
             <h1 style={s.pageTitle}>Face Scan Logs</h1>
-            <p style={s.pageSub}>{logs.length} total scans recorded</p>
+            <p style={s.pageSub}>{pagination?.total ?? logs.length} total scans recorded</p>
           </div>
         </div>
 
@@ -96,13 +93,19 @@ export default function ScanLogs() {
           <input
             type='text'
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => {
+              setPage(1)
+              setSearch(e.target.value)
+            }}
             placeholder='Search by student name or roll number...'
             style={s.searchInput}
           />
           <select
             value={filterType}
-            onChange={e => setFilterType(e.target.value)}
+            onChange={e => {
+              setPage(1)
+              setFilterType(e.target.value)
+            }}
             style={s.filterSelect}
           >
             <option value='all'>All Types</option>
@@ -111,7 +114,10 @@ export default function ScanLogs() {
           </select>
           <select
             value={filterMatch}
-            onChange={e => setFilterMatch(e.target.value)}
+            onChange={e => {
+              setPage(1)
+              setFilterMatch(e.target.value)
+            }}
             style={s.filterSelect}
           >
             <option value='all'>All Results</option>
@@ -122,7 +128,7 @@ export default function ScanLogs() {
 
         {(search || filterType !== 'all' || filterMatch !== 'all') && (
           <p style={s.resultCount}>
-            Showing {filtered.length} of {logs.length} logs
+            Showing {filtered.length} of {pagination?.total ?? logs.length} logs
           </p>
         )}
 
@@ -311,6 +317,28 @@ export default function ScanLogs() {
           </div>
         )}
 
+        {pagination && pagination.totalPages > 1 && (
+          <div style={s.pagination}>
+            <button
+              style={s.pageBtn}
+              onClick={() => setPage(page - 1)}
+              disabled={!pagination.hasPrevPage}
+            >
+              Previous
+            </button>
+            <span style={s.pageInfo}>
+              Page {pagination.page} of {pagination.totalPages}
+            </span>
+            <button
+              style={s.pageBtn}
+              onClick={() => setPage(page + 1)}
+              disabled={!pagination.hasNextPage}
+            >
+              Next
+            </button>
+          </div>
+        )}
+
       </div>
     </div>
   )
@@ -375,5 +403,8 @@ const s = {
   detailGrid:    { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px' },
   detailItem:    { background: '#f8f9ff', borderRadius: '8px', padding: '10px 14px' },
   detailLabel:   { display: 'block', fontSize: '11px', color: '#aaa', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' },
-  detailVal:     { display: 'block', fontSize: '13px', color: '#333', fontWeight: '500', wordBreak: 'break-all' }
+  detailVal:     { display: 'block', fontSize: '13px', color: '#333', fontWeight: '500', wordBreak: 'break-all' },
+  pagination:    { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', marginTop: '18px' },
+  pageBtn:       { background: '#fff', color: '#4f46e5', border: '1.5px solid #c7d2fe', padding: '9px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' },
+  pageInfo:      { fontSize: '13px', color: '#666', fontWeight: '600' }
 }

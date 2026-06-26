@@ -33,6 +33,18 @@ test('assigned warden is allowed', () => {
   assert.equal(res.result.statusCode, null)
 })
 
+test('assigned populated warden is allowed', () => {
+  const res = response()
+  const allowed = requireAssignedWarden(
+    { warden1Id: { _id: { toString: () => 'warden-1' }, name: 'Warden' } },
+    { user: { _id: { toString: () => 'warden-1' } } },
+    res
+  )
+
+  assert.equal(allowed, true)
+  assert.equal(res.result.statusCode, null)
+})
+
 test('unassigned warden is rejected', () => {
   const res = response()
   const allowed = requireAssignedWarden(

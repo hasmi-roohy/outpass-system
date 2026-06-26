@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import Navbar from '../../../components/Navbar'
 import WebcamCapture from '../../../components/WebcamCapture'
 import {
-  getAllStudentsApi,
+  getStudentByIdApi,
   editStudentApi,
   getAllWarden1sApi,
   getAllWarden2sApi,
@@ -47,11 +47,11 @@ export default function EditStudent() {
   const fetchData = async () => {
     try {
       const [studentsRes, w1Res, w2Res] = await Promise.all([
-        getAllStudentsApi(),
+        getStudentByIdApi(id),
         getAllWarden1sApi(),
         getAllWarden2sApi()
       ])
-      const student = studentsRes.data.find(s => s._id === id)
+      const student = studentsRes.data
       if (student) {
         setFormData({
           name:        student.name        || '',
