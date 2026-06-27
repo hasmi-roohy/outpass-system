@@ -1,7 +1,9 @@
 const nodemailer = require('nodemailer')
+const dns = require('dns').promises
 
 const emailPassword = (process.env.EMAIL_PASS || '').replace(/\s/g, '')
 const rejectUnauthorized = process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false'
+let transporterPromise
 
 const escapeHtml = value => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -10,19 +12,39 @@ const escapeHtml = value => String(value ?? '')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;')
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  family: 4,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: emailPassword
-  },
-  tls: {
-    rejectUnauthorized
+const createTransporter = async () => {
+  const { address } = await dns.lookup('smtp.gmail.com', { family: 4 })
+  console.log(`Gmail SMTP IPv4 resolved: ${address}`)
+
+  return nodemailer.createTransport({
+    host: address,
+    port: 465,
+    secure: true,
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: emailPassword
+    },
+    tls: {
+      servername: 'smtp.gmail.com',
+      rejectUnauthorized
+    }
+  })
+}
+
+const getTransporter = () => {
+  if (!transporterPromise) {
+    transporterPromise = createTransporter().catch(error => {
+      transporterPromise = null
+      throw error
+    })
   }
-})
+  return transporterPromise
+}
+
+const sendMail = async mailOptions => {
+  const transporter = await getTransporter()
+  return transporter.sendMail(mailOptions)
+}
 
 const formatDate = value => new Date(value).toDateString()
 const formatDateTime = value => new Date(value).toLocaleString()
@@ -117,7 +139,7 @@ const sendOutpassMail = async (student, outpass, parentTokens) => {
         </p>
       `
 
-      return transporter.sendMail({
+      return sendMail({
         from: `"College Outpass System" <${process.env.EMAIL_USER}>`,
         to: parent.email,
         subject: `Outpass Request - ${student.name} (${student.rollNumber})`,
@@ -176,7 +198,7 @@ const sendApprovalMailToStudent = async (student, outpass, approvedBy) => {
       </p>
     `
 
-    await transporter.sendMail({
+    await sendMail({
       from: `"College Outpass System" <${process.env.EMAIL_USER}>`,
       to: student.email,
       subject: 'Your Outpass Has Been Approved',
@@ -212,7 +234,7 @@ const sendRejectionMailToStudent = async (student, outpass, rejectedBy, reason) 
       <p style="color: #64748b; font-size: 14px;">Please contact your warden if you have questions.</p>
     `
 
-    await transporter.sendMail({
+    await sendMail({
       from: `"College Outpass System" <${process.env.EMAIL_USER}>`,
       to: student.email,
       subject: 'Your Outpass Request Was Rejected',
