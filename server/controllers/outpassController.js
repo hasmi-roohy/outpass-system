@@ -7,6 +7,16 @@ const { requireAssignedWarden, requireStatus } = require('../utils/outpassGuards
 const cleanText = value => typeof value === 'string' ? value.trim() : ''
 const MONTHLY_LIMIT_STATUSES = ['out', 'returned', 'late_return']
 const MONTHLY_USED_OUTPASS_LIMIT = 6
+const runEmailInBackground = (label, task) => {
+  Promise.resolve()
+    .then(task)
+    .then(result => {
+      if (result) console.log(`${label}:`, result)
+    })
+    .catch(error => {
+      console.log(`${label} failed:`, error.message)
+    })
+}
 
 const getPagination = (req, defaultLimit = 20, maxLimit = 100) => {
   const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1)
@@ -262,12 +272,12 @@ const forwardToParents = async (req, res) => {
     outpass.status          = 'warden_forwarded'
     await outpass.save()
 
-    const emailDelivery = await sendOutpassMail(student, outpass, parentTokens)
+    runEmailInBackground('Parent email delivery', () => sendOutpassMail(student, outpass, parentTokens))
 
     res.status(200).json({
-      message: `Outpass forwarded and ${parentTokens.length} parent email${parentTokens.length === 1 ? '' : 's'} processed`,
+      message: `Outpass forwarded. ${parentTokens.length} parent email${parentTokens.length === 1 ? '' : 's'} are being sent in the background.`,
       outpass,
-      emailDelivery
+      emailDelivery: { status: 'sending', total: parentTokens.length }
     })
 
   } catch (error) {
@@ -298,10 +308,10 @@ const resendParentEmails = async (req, res) => {
     })
     await outpass.save()
 
-    const emailDelivery = await sendOutpassMail(outpass.studentId, outpass, pendingParents)
-    const message = `${pendingParents.length} parent email${pendingParents.length === 1 ? '' : 's'} processed for resend`
+    runEmailInBackground('Parent email resend delivery', () => sendOutpassMail(outpass.studentId, outpass, pendingParents))
+    const message = `${pendingParents.length} parent email${pendingParents.length === 1 ? '' : 's'} are being resent in the background`
 
-    res.status(200).json({ message, emailDelivery })
+    res.status(200).json({ message, emailDelivery: { status: 'sending', total: pendingParents.length } })
   } catch (error) {
     if (error.code === 11000) {
       return res.status(400).json({ message: 'You already have an active outpass' })
@@ -464,9 +474,9 @@ const parentRespond = async (req, res) => {
 
     const student = await User.findById(outpass.studentId).select('name email')
     if (status === 'approved') {
-      await sendApprovalMailToStudent(student, outpass, `${parent.name} (${parent.relation})`)
+      runEmailInBackground('Student approval email', () => sendApprovalMailToStudent(student, outpass, `${parent.name} (${parent.relation})`))
     } else {
-      await sendRejectionMailToStudent(student, outpass, `${parent.name} (${parent.relation})`, rejectionReason)
+      runEmailInBackground('Student rejection email', () => sendRejectionMailToStudent(student, outpass, `${parent.name} (${parent.relation})`, rejectionReason))
     }
 
 
@@ -527,7 +537,7 @@ const parentApproveDirect = async (req, res) => {
     )
 
     const student = await User.findById(outpass.studentId).select('name email')
-    await sendApprovalMailToStudent(student, outpass, `${parent?.name || 'Parent'} (${parent?.relation || 'Guardian'})`)
+    runEmailInBackground('Student approval email', () => sendApprovalMailToStudent(student, outpass, `${parent?.name || 'Parent'} (${parent?.relation || 'Guardian'})`))
 
     return res.status(200).send(parentActionPage({
       title: 'Outpass Approved',
@@ -591,12 +601,12 @@ const parentRejectDirect = async (req, res) => {
     )
 
     const student = await User.findById(outpass.studentId).select('name email')
-    await sendRejectionMailToStudent(
+    runEmailInBackground('Student rejection email', () => sendRejectionMailToStudent(
       student,
       outpass,
       `${parent?.name || 'Parent'} (${parent?.relation || 'Guardian'})`,
       'Declined from email'
-    )
+    ))
 
     return res.status(200).send(parentActionPage({
       title: 'Outpass Declined',
@@ -663,7 +673,7 @@ const callApprove = async (req, res) => {
     await outpass.save()
 
     const student = await User.findById(outpass.studentId).select('name email')
-    await sendApprovalMailToStudent(student, outpass, 'Warden (Call Approved)')
+    runEmailInBackground('Student approval email', () => sendApprovalMailToStudent(student, outpass, 'Warden (Call Approved)'))
 
     res.status(200).json({ message: 'Outpass approved via call', outpass })
 
@@ -708,7 +718,7 @@ const adminEmergencyApprove = async (req, res) => {
     await outpass.save()
 
     const student = await User.findById(outpass.studentId).select('name email')
-    await sendApprovalMailToStudent(student, outpass, `Admin Emergency Approval (${req.user.name})`)
+    runEmailInBackground('Student approval email', () => sendApprovalMailToStudent(student, outpass, `Admin Emergency Approval (${req.user.name})`))
 
     res.status(200).json({
       message: 'Outpass approved by admin emergency override',
