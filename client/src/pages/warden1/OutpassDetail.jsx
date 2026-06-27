@@ -4,12 +4,24 @@ import Navbar from '../../components/Navbar'
 import StatusBadge from '../../components/StatusBadge'
 import {
   forwardToParentsApi,
+  resendParentEmailsApi,
   rejectOutpassApi,
   callApproveApi,
-  cancelOutpassApi
+  cancelOutpassApi,
+  getSingleOutpassApi
 } from '../../api/api'
 
-const BASE_URL = 'http://localhost:5000/api'
+const statusGuidance = {
+  pending: ['Warden review required', 'Review the request, then forward it to parents or reject it.', '#f59e0b', '#fff8e1'],
+  warden_forwarded: ['Waiting for a parent response', 'Approval links were sent to parents. You can call-approve or cancel if needed.', '#0891b2', '#e8f4fd'],
+  approved: ['Approved and ready for gate exit', 'No further approval action is needed. The gate warden must verify the student before exit.', '#16a34a', '#f0fff4'],
+  rejected: ['Request rejected', 'This request is closed. The student must submit a new request if another outpass is needed.', '#dc2626', '#fff0f0'],
+  cancelled: ['Outpass cancelled', 'This request is closed and no further actions are available.', '#6b7280', '#f5f5f5'],
+  out: ['Student is outside campus', 'The exit scan is complete. The next step is a return scan by the gate warden.', '#9333ea', '#fdf4ff'],
+  returned: ['Outpass completed', 'The student has returned and the workflow is complete.', '#16a34a', '#f0fff4'],
+  late_return: ['Student return is late', 'Contact the student and gate warden. A return scan is still required.', '#ea580c', '#fff8f0'],
+  expired: ['Outpass expired', 'The approved travel period ended before the student completed an exit scan.', '#6b7280', '#f5f5f5']
+}
 
 export default function OutpassDetail() {
   const { id }   = useParams()
@@ -23,19 +35,19 @@ export default function OutpassDetail() {
   const [success,   setSuccess]   = useState('')
   const [confirmAction, setConfirmAction] = useState(null)
 
-  useEffect(() => { fetchOutpass() }, [])
+  useEffect(() => {
+    fetchOutpass()
+    // The detail request should only rerun when the route ID changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
 
   const fetchOutpass = async () => {
     try {
-      const res = await fetch(`${BASE_URL}/outpass/${id}`, {
-        headers: {
-          Authorization: `Bearer ${JSON.parse(localStorage.getItem('user'))?.token}`
-        }
-      })
-      const data = await res.json()
-      setOutpass(data)
+      const res = await getSingleOutpassApi(id)
+      setOutpass(res.data)
     } catch (err) {
-      setError('Failed to load outpass details')
+      setOutpass(null)
+      setError(err.response?.data?.message || err.message || 'Failed to load outpass details')
     } finally {
       setLoading(false)
     }
@@ -48,8 +60,8 @@ export default function OutpassDetail() {
 
     try {
       if (action === 'forward') {
-        await forwardToParentsApi(id, { wardenNote: note })
-        setSuccess('✅ Outpass forwarded to parents successfully!')
+        const res = await forwardToParentsApi(id, { wardenNote: note })
+        setSuccess(res.data.message)
       } else if (action === 'reject') {
         await rejectOutpassApi(id, { wardenNote: note })
         setSuccess('Outpass rejected.')
@@ -59,6 +71,9 @@ export default function OutpassDetail() {
       } else if (action === 'cancel') {
         await cancelOutpassApi(id, { wardenNote: note })
         setSuccess('Outpass cancelled.')
+      } else if (action === 'resend') {
+        const res = await resendParentEmailsApi(id)
+        setSuccess(res.data.message)
       }
 
       setConfirmAction(null)
@@ -81,11 +96,11 @@ export default function OutpassDetail() {
     </div>
   )
 
-  if (!outpass) return (
+  if (!outpass?._id) return (
     <div style={s.page}>
       <Navbar />
       <div style={s.errorBox}>
-        <p>⚠️ Outpass not found</p>
+        <p>{error || 'Outpass not found or you do not have permission to view it.'}</p>
         <button style={s.backBtn} onClick={() => navigate('/warden1')}>
           ← Back to Dashboard
         </button>
@@ -100,10 +115,12 @@ export default function OutpassDetail() {
   const canReject     = outpass.status === 'pending'
   const canCallApprove= outpass.status === 'warden_forwarded'
   const canCancel     = ['warden_forwarded', 'approved'].includes(outpass.status)
-
-  const respondedParent = parentTokens.find(
-    p => p.status === 'approved' || p.status === 'rejected'
-  )
+  const guidance      = statusGuidance[outpass.status] || [
+    'Status unavailable',
+    'Refresh the page or contact the administrator.',
+    '#6b7280',
+    '#f5f5f5'
+  ]
 
   return (
     <div style={s.page}>
@@ -126,6 +143,27 @@ export default function OutpassDetail() {
 
         {error   && <div style={s.errorAlert}> ⚠️ {error}</div>}
         {success && <div style={s.successAlert}>✅ {success}</div>}
+
+        <div style={{
+          ...s.stageBanner,
+          background: guidance[3],
+          borderColor: guidance[2]
+        }}>
+          <div style={{ ...s.stageNumber, background: guidance[2] }}>
+            {outpass.status === 'pending' ? '1'
+              : outpass.status === 'warden_forwarded' ? '2'
+              : outpass.status === 'approved' ? '3'
+              : ['out', 'late_return'].includes(outpass.status) ? '4'
+              : outpass.status === 'returned' ? '5'
+              : '!'}
+          </div>
+          <div>
+            <strong style={{ ...s.stageTitle, color: guidance[2] }}>
+              {guidance[0]}
+            </strong>
+            <p style={s.stageDescription}>{guidance[1]}</p>
+          </div>
+        </div>
 
         {/* No response alert */}
         {noResponse && (
@@ -251,6 +289,10 @@ export default function OutpassDetail() {
             <div style={s.card}>
               <h3 style={s.cardTitle}>⚡ Actions</h3>
 
+              <p style={s.cardSub}>
+                Current status: <strong>{outpass.status.replaceAll('_', ' ')}</strong>
+              </p>
+
               {canForward && (
                 <button
                   style={s.forwardBtn}
@@ -268,6 +310,16 @@ export default function OutpassDetail() {
                   disabled={acting}
                 >
                   ❌ Reject Request
+                </button>
+              )}
+
+              {canCallApprove && (
+                <button
+                  style={s.resendBtn}
+                  onClick={() => setConfirmAction('resend')}
+                  disabled={acting}
+                >
+                  Resend Parent Emails
                 </button>
               )}
 
@@ -293,7 +345,11 @@ export default function OutpassDetail() {
 
               {!canForward && !canReject && !canCallApprove && !canCancel && (
                 <div style={s.noActions}>
-                  <p style={s.noActionsText}>No actions available for this outpass</p>
+                  <strong style={s.noActionsTitle}>{guidance[0]}</strong>
+                  <p style={s.noActionsText}>{guidance[1]}</p>
+                  <button style={s.dashboardBtn} onClick={() => navigate('/warden1')}>
+                    Back to Warden Dashboard
+                  </button>
                 </div>
               )}
             </div>
@@ -419,12 +475,14 @@ export default function OutpassDetail() {
                 {confirmAction === 'reject'      && '❌ Reject this Outpass?'}
                 {confirmAction === 'callApprove' && '📞 Approve via Call?'}
                 {confirmAction === 'cancel'      && '🚫 Cancel this Outpass?'}
+                {confirmAction === 'resend'      && 'Resend Parent Emails?'}
               </h3>
               <p style={s.modalSub}>
                 {confirmAction === 'forward'     && 'Emails will be sent to all 4 registered parents.'}
                 {confirmAction === 'reject'      && 'This action cannot be undone.'}
                 {confirmAction === 'callApprove' && 'You are confirming that you spoke to a parent and they approved.'}
                 {confirmAction === 'cancel'      && 'The outpass will be cancelled immediately.'}
+                {confirmAction === 'resend'      && 'Pending parents will receive their approval links again.'}
               </p>
               {note && (
                 <div style={s.modalNote}>
@@ -442,7 +500,7 @@ export default function OutpassDetail() {
                 <button
                   style={{
                     ...s.modalConfirm,
-                    background: confirmAction === 'forward'     ? '#4f46e5'
+                    background: confirmAction === 'forward' || confirmAction === 'resend' ? '#4f46e5'
                       : confirmAction === 'callApprove' ? '#16a34a'
                       : '#dc2626'
                   }}
@@ -473,6 +531,10 @@ const s = {
 
   errorAlert:       { background: '#fff0f0', border: '1px solid #fecaca', color: '#dc2626', padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', fontSize: '14px' },
   successAlert:     { background: '#f0fff4', border: '1px solid #86efac', color: '#16a34a', padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', fontSize: '14px' },
+  stageBanner:      { border: '1px solid', borderLeftWidth: '5px', borderRadius: '12px', padding: '16px 18px', display: 'flex', gap: '14px', alignItems: 'flex-start', marginBottom: '20px' },
+  stageNumber:      { width: '32px', height: '32px', borderRadius: '50%', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: '800', flexShrink: 0 },
+  stageTitle:       { display: 'block', fontSize: '15px', marginBottom: '4px' },
+  stageDescription: { color: '#555', fontSize: '13px', lineHeight: '1.5', margin: 0 },
 
   noResponseAlert:  { background: '#fff8f0', border: '1px solid #fed7aa', borderRadius: '12px', padding: '16px 20px', display: 'flex', gap: '16px', alignItems: 'flex-start', marginBottom: '20px' },
   alertIcon:        { fontSize: '28px', flexShrink: 0 },
@@ -502,9 +564,12 @@ const s = {
   forwardBtn:       { width: '100%', background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: '#fff', border: 'none', padding: '14px', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '15px', marginBottom: '10px' },
   rejectBtn:        { width: '100%', background: '#fff', color: '#dc2626', border: '2px solid #dc2626', padding: '12px', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '14px', marginBottom: '10px' },
   callApproveBtn:   { width: '100%', background: '#16a34a', color: '#fff', border: 'none', padding: '14px', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '15px', marginBottom: '10px' },
+  resendBtn:        { width: '100%', background: '#fff', color: '#4f46e5', border: '2px solid #4f46e5', padding: '12px', borderRadius: '10px', cursor: 'pointer', fontWeight: '700', fontSize: '14px', marginBottom: '10px' },
   cancelBtn:        { width: '100%', background: '#fff', color: '#888', border: '1.5px solid #e0e0e0', padding: '12px', borderRadius: '10px', cursor: 'pointer', fontWeight: '600', fontSize: '14px' },
-  noActions:        { textAlign: 'center', padding: '20px 0' },
-  noActionsText:    { color: '#aaa', fontSize: '14px' },
+  noActions:        { background: '#f8f9ff', borderRadius: '10px', padding: '16px', textAlign: 'left' },
+  noActionsTitle:   { color: '#333', fontSize: '14px', display: 'block', marginBottom: '6px' },
+  noActionsText:    { color: '#666', fontSize: '13px', lineHeight: '1.5', margin: '0 0 12px' },
+  dashboardBtn:     { background: '#fff', color: '#4f46e5', border: '1px solid #c7d2fe', padding: '9px 12px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '12px' },
 
   parentList:       { display: 'flex', flexDirection: 'column', gap: '10px' },
   parentItem:       { borderRadius: '10px', padding: '12px 14px' },

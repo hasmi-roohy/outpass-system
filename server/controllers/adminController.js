@@ -4,18 +4,100 @@ const FaceScanLog = require('../models/FaceScanLog')
 const bcrypt      = require('bcryptjs')
 const { registerFace } = require('../services/faceService')
 
+const getPagination = (req, defaultLimit = 20, maxLimit = 100) => {
+  const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1)
+  const requestedLimit = Number.parseInt(req.query.limit, 10) || defaultLimit
+  const limit = Math.min(Math.max(requestedLimit, 1), maxLimit)
+  const skip = (page - 1) * limit
+  return { page, limit, skip }
+}
+
+const pagedResponse = (items, total, page, limit) => ({
+  items,
+  pagination: {
+    page,
+    limit,
+    total,
+    totalPages: Math.max(Math.ceil(total / limit), 1),
+    hasNextPage: page * limit < total,
+    hasPrevPage: page > 1
+  }
+})
+
+const regex = value => new RegExp(
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+  'i'
+)
+
+const withAssignedStudentCounts = async (wardens, fieldName) => {
+  const counts = await User.aggregate([
+    {
+      $match: {
+        role: 'student',
+        [fieldName]: { $in: wardens.map(warden => warden._id) }
+      }
+    },
+    { $group: { _id: `$${fieldName}`, count: { $sum: 1 } } }
+  ])
+
+  const countByWarden = new Map(counts.map(item => [item._id.toString(), item.count]))
+  return wardens.map(warden => ({
+    ...warden,
+    assignedStudentCount: countByWarden.get(warden._id.toString()) || 0
+  }))
+}
+
 // ─────────────────────────────────────
 // STUDENT MANAGEMENT
 // ─────────────────────────────────────
 
 const getAllStudents = async (req, res) => {
   try {
-    const students = await User.find({ role: 'student' })
+    const { page, limit, skip } = getPagination(req)
+    const { search = '', status = 'all' } = req.query
+    const query = { role: 'student' }
+
+    if (search) {
+      const term = regex(search)
+      query.$or = [
+        { name: term },
+        { email: term },
+        { rollNumber: term },
+        { department: term }
+      ]
+    }
+
+    if (status === 'active') query.isActive = true
+    if (status === 'inactive') query.isActive = false
+
+    const [students, total] = await Promise.all([
+      User.find(query)
       .select('-password')
       .populate('warden1Id', 'name email')
       .populate('warden2Id', 'name email')
       .sort({ createdAt: -1 })
-    res.status(200).json(students)
+        .skip(skip)
+        .limit(limit),
+      User.countDocuments(query)
+    ])
+
+    res.status(200).json(pagedResponse(students, total, page, limit))
+  } catch (error) {
+    res.status(500).json({ message: error.message })
+  }
+}
+
+const getStudentById = async (req, res) => {
+  try {
+    const student = await User.findById(req.params.id)
+      .populate('warden1Id', 'name email')
+      .populate('warden2Id', 'name email')
+
+    if (!student || student.role !== 'student') {
+      return res.status(404).json({ message: 'Student not found' })
+    }
+
+    res.status(200).json(student)
   } catch (error) {
     res.status(500).json({ message: error.message })
   }
@@ -23,8 +105,6 @@ const getAllStudents = async (req, res) => {
 
 const addStudent = async (req, res) => {
   try {
-    console.log('Add student body keys:', Object.keys(req.body))
-
     const {
       name, email, password, phone,
       rollNumber, department, year,
@@ -212,7 +292,8 @@ const getAllWarden1s = async (req, res) => {
     const wardens = await User.find({ role: 'warden1' })
       .select('-password')
       .sort({ createdAt: -1 })
-    res.status(200).json(wardens)
+      .lean()
+    res.status(200).json(await withAssignedStudentCounts(wardens, 'warden1Id'))
   } catch (error) {
     res.status(500).json({ message: error.message })
   }
@@ -261,6 +342,15 @@ const deleteWarden1 = async (req, res) => {
     if (!warden || warden.role !== 'warden1') {
       return res.status(404).json({ message: 'Warden1 not found' })
     }
+    const assignedStudents = await User.countDocuments({
+      role: 'student',
+      warden1Id: warden._id
+    })
+    if (assignedStudents > 0) {
+      return res.status(409).json({
+        message: `Cannot delete this Warden 1 because ${assignedStudents} student${assignedStudents === 1 ? ' is' : 's are'} assigned. Reassign students first.`
+      })
+    }
     await warden.deleteOne()
     res.status(200).json({ message: 'Warden1 deleted successfully' })
   } catch (error) {
@@ -277,7 +367,8 @@ const getAllWarden2s = async (req, res) => {
     const wardens = await User.find({ role: 'warden2' })
       .select('-password')
       .sort({ createdAt: -1 })
-    res.status(200).json(wardens)
+      .lean()
+    res.status(200).json(await withAssignedStudentCounts(wardens, 'warden2Id'))
   } catch (error) {
     res.status(500).json({ message: error.message })
   }
@@ -325,6 +416,15 @@ const deleteWarden2 = async (req, res) => {
     const warden = await User.findById(req.params.id)
     if (!warden || warden.role !== 'warden2') {
       return res.status(404).json({ message: 'Warden2 not found' })
+    }
+    const assignedStudents = await User.countDocuments({
+      role: 'student',
+      warden2Id: warden._id
+    })
+    if (assignedStudents > 0) {
+      return res.status(409).json({
+        message: `Cannot delete this Warden 2 because ${assignedStudents} student${assignedStudents === 1 ? ' is' : 's are'} assigned. Reassign students first.`
+      })
     }
     await warden.deleteOne()
     res.status(200).json({ message: 'Warden2 deleted successfully' })
@@ -409,11 +509,42 @@ const deleteAdmin = async (req, res) => {
 
 const getAllOutpasses = async (req, res) => {
   try {
-    const outpasses = await Outpass.find()
+    const { page, limit, skip } = getPagination(req)
+    const { search = '', status = 'all' } = req.query
+    const query = {}
+
+    if (status !== 'all') query.status = status
+
+    if (search) {
+      const term = regex(search)
+      const studentIds = await User.find({
+        role: 'student',
+        $or: [
+          { name: term },
+          { rollNumber: term },
+          { email: term },
+          { department: term }
+        ]
+      }).distinct('_id')
+
+      query.$or = [
+        { destination: term },
+        { reason: term },
+        { studentId: { $in: studentIds } }
+      ]
+    }
+
+    const [outpasses, total] = await Promise.all([
+      Outpass.find(query)
       .populate('studentId', 'name email rollNumber department')
       .populate('warden1Id', 'name email')
       .sort({ createdAt: -1 })
-    res.status(200).json(outpasses)
+        .skip(skip)
+        .limit(limit),
+      Outpass.countDocuments(query)
+    ])
+
+    res.status(200).json(pagedResponse(outpasses, total, page, limit))
   } catch (error) {
     res.status(500).json({ message: error.message })
   }
@@ -421,12 +552,39 @@ const getAllOutpasses = async (req, res) => {
 
 const getAllScanLogs = async (req, res) => {
   try {
-    const logs = await FaceScanLog.find()
+    const { page, limit, skip } = getPagination(req)
+    const { search = '', type = 'all', match = 'all' } = req.query
+    const query = {}
+
+    if (type !== 'all') query.type = type
+    if (match === 'matched') query.matched = true
+    if (match === 'failed') query.matched = false
+
+    if (search) {
+      const term = regex(search)
+      const studentIds = await User.find({
+        role: 'student',
+        $or: [
+          { name: term },
+          { rollNumber: term },
+          { email: term }
+        ]
+      }).distinct('_id')
+      query.studentId = { $in: studentIds }
+    }
+
+    const [logs, total] = await Promise.all([
+      FaceScanLog.find(query)
       .populate('studentId', 'name email rollNumber')
       .populate('outpassId')
       .populate('scannedBy', 'name email')
       .sort({ scannedAt: -1 })
-    res.status(200).json(logs)
+        .skip(skip)
+        .limit(limit),
+      FaceScanLog.countDocuments(query)
+    ])
+
+    res.status(200).json(pagedResponse(logs, total, page, limit))
   } catch (error) {
     res.status(500).json({ message: error.message })
   }
@@ -443,11 +601,33 @@ const getDashboardStats = async (req, res) => {
     const currentlyOut   = await Outpass.countDocuments({ status: 'out' })
     const lateReturns    = await Outpass.countDocuments({ status: 'late_return' })
     const failedScans    = await FaceScanLog.countDocuments({ matched: false })
+    const missingWarden1 = await User.countDocuments({
+      role: 'student',
+      $or: [{ warden1Id: { $exists: false } }, { warden1Id: null }]
+    })
+    const missingWarden2 = await User.countDocuments({
+      role: 'student',
+      $or: [{ warden2Id: { $exists: false } }, { warden2Id: null }]
+    })
+    const studentsMissingWardens = await User.find({
+      role: 'student',
+      $or: [
+        { warden1Id: { $exists: false } },
+        { warden1Id: null },
+        { warden2Id: { $exists: false } },
+        { warden2Id: null }
+      ]
+    })
+      .select('name rollNumber department warden1Id warden2Id')
+      .sort({ createdAt: -1 })
+      .limit(8)
+      .lean()
 
     res.status(200).json({
       totalStudents, totalWarden1s, totalWarden2s,
       totalOutpasses, pending, approved,
-      currentlyOut, lateReturns, failedScans
+      currentlyOut, lateReturns, failedScans,
+      missingWarden1, missingWarden2, studentsMissingWardens
     })
   } catch (error) {
     res.status(500).json({ message: error.message })
@@ -458,7 +638,7 @@ const getDashboardStats = async (req, res) => {
 // EXPORTS
 // ─────────────────────────────────────
 module.exports = {
-  getAllStudents,    addStudent,    editStudent,    deleteStudent,
+  getAllStudents,    getStudentById, addStudent,    editStudent,    deleteStudent,
   getAllWarden1s,    addWarden1,    editWarden1,    deleteWarden1,
   getAllWarden2s,    addWarden2,    editWarden2,    deleteWarden2,
   getAllAdmins,      addAdmin,      editAdmin,      deleteAdmin,

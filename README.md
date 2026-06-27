@@ -1,232 +1,240 @@
 # Outpass Management System
 
-A role-based college outpass management application that handles student leave
-requests, warden review, parent approval, and gate entry/exit verification.
-
-The system includes face recognition for students and parents, email-based
-approval links, role-based dashboards, scan logs, and a student chatbot.
+Role-based college outpass management system for student movement requests,
+warden review, parent approval, gate face scanning, scan logs, and admin
+operations.
 
 ## Features
 
-### Student
+- Student outpass application and request history
+- One active outpass per student
+- Maximum 6 used outpasses per student per month
+- Warden 1 review, reject, forward-to-parent, call approve, and cancel actions
+- Parent approval/rejection from one-click email links
+- Warden 2 gate scanner for exit and return face verification
+- Manual gate override after a failed face scan with a required reason
+- Admin dashboards for students, wardens, outpasses, scan logs, and assignments
+- Missing Warden 1 / Warden 2 assignment warnings for admins
+- Pagination for larger admin and outpass lists
+- Student chatbot for common outpass questions
+- Scheduled cleanup for no parent response, expired outpasses, and late returns
 
-- Apply for an outpass with destination, reason, dates, and times
-- Track current and previous outpass requests
-- View approval status
-- Ask the chatbot about outpass-related questions
+## Roles
 
-### Warden 1
+| Role | Main Access |
+| --- | --- |
+| Student | Apply, cancel eligible requests, track status |
+| Warden 1 | Review assigned students, forward to parents, call approve, cancel |
+| Warden 2 | Search assigned students, scan exit and return, manual override |
+| Parent | Approve or decline from secure email links |
+| Admin | Manage users, assignments, all outpasses, and scan logs |
 
-- Review assigned students' outpass requests
-- Forward requests to parents or reject them
-- View requests with no parent response
-- Approve after confirming with a parent by phone
-- View the complete outpass history of assigned students
-
-### Parent
-
-- Open a unique approval link received by email
-- Verify identity using face recognition
-- Approve or reject the outpass request
-
-### Warden 2 / Gate Warden
-
-- Search for an approved outpass using the student's roll number
-- Verify the student's face when leaving and returning
-- Record exit and return scan logs
-- Apply a documented manual override when face verification fails
-
-### Admin
-
-- Manage students, wardens, and admins
-- Assign wardens to students
-- Register student and parent faces
-- View dashboard statistics, all outpasses, and scan logs
-
-## Outpass Workflow
+## Workflow
 
 ```text
-Student submits request
-        |
-        v
-Warden 1 reviews request
-        |
-        v
-Request is forwarded to parents
-        |
-        v
-Parent verifies face and responds
-        |
-        v
-Approved student completes exit face scan
-        |
-        v
-Student completes return face scan
+Student applies
+  -> Warden 1 reviews
+  -> Warden 1 forwards email links to parents
+  -> Parent approves or declines
+  -> Warden 2 scans student face at exit
+  -> Warden 2 scans student face at return
 ```
 
-The normal status flow is:
+Normal status flow:
 
 ```text
 pending -> warden_forwarded -> approved -> out -> returned
 ```
 
-An outpass may also become `rejected`, `cancelled`, `expired`, or
-`late_return`.
-
-## Architecture
+Other possible statuses:
 
 ```text
-React + Vite client
-        |
-        v
-Node.js + Express API
-        |
-        +---- MongoDB
-        |
-        +---- FastAPI AI service
-                 |
-                 +---- DeepFace face recognition
-                 +---- Intent-based chatbot
+rejected, cancelled, expired, late_return
 ```
 
-## Technology Stack
+## Tech Stack
 
-- **Frontend:** React, Vite, React Router, Axios
-- **Backend:** Node.js, Express, MongoDB, Mongoose
-- **Authentication:** JSON Web Tokens and role-based authorization
-- **AI service:** Python, FastAPI, DeepFace, OpenCV, scikit-learn
-- **Face image storage:** Local storage with Cloudinary backup
-- **Email notifications:** Nodemailer with Gmail
-- **Scheduled tasks:** Node Cron
+| Area | Technology |
+| --- | --- |
+| Frontend | React, Vite, React Router, Axios |
+| Backend | Node.js, Express, Mongoose |
+| Database | MongoDB |
+| AI Service | Python, FastAPI, DeepFace, OpenCV |
+| Email | Nodemailer with Gmail app password |
+| Auth | JWT with role-based authorization |
+| Scheduler | node-cron |
+| Image Backup | Cloudinary |
 
 ## Project Structure
 
 ```text
 outpass-system/
-|-- client/       # React frontend
-|-- server/       # Express API and MongoDB models
-|-- ai-service/   # FastAPI face recognition and chatbot service
-`-- README.md
+|-- client/       React frontend
+|-- server/       Express API, models, controllers, routes
+|-- ai-service/   FastAPI face recognition and chatbot service
+|-- README.md
 ```
 
 ## Prerequisites
 
-Install the following before running the project:
-
 - Node.js and npm
-- Python 3 and pip
-- MongoDB, either locally or through MongoDB Atlas
-- A Gmail account with an app password for email notifications
-- A Cloudinary account for face image backup
+- Python 3
+- MongoDB local or MongoDB Atlas
+- Gmail app password for `EMAIL_PASS`
+- Cloudinary account for face image backup
 
-## Environment Variables
+## Environment Files
+
+Create `client/.env`:
+
+```env
+VITE_API_URL=http://localhost:5000/api
+```
 
 Create `server/.env`:
 
 ```env
 PORT=5000
-MONGO_URI=your_mongodb_connection_string
-JWT_SECRET=your_long_random_secret
+MONGO_URI=mongodb://localhost:27017/outpass-system
+JWT_SECRET=replace_with_a_long_random_secret
 CLIENT_URL=http://localhost:5173
+SERVER_URL=http://localhost:5000
 AI_SERVICE_URL=http://localhost:8000
-EMAIL_USER=your_email_address
+AI_SERVICE_API_KEY=replace_with_same_key_as_ai_service_if_used
+EMAIL_USER=your_gmail_address
 EMAIL_PASS=your_gmail_app_password
+SMTP_TLS_REJECT_UNAUTHORIZED=false
 ```
 
 Create `ai-service/.env`:
 
 ```env
 EXPRESS_URL=http://localhost:5000
+AI_SERVICE_API_KEY=replace_with_same_key_as_server_if_used
 CLOUDINARY_CLOUD_NAME=your_cloudinary_cloud_name
 CLOUDINARY_API_KEY=your_cloudinary_api_key
 CLOUDINARY_API_SECRET=your_cloudinary_api_secret
+FACE_MODEL=Facenet512
+FACE_DETECTOR=opencv
+FACE_DISTANCE_METRIC=cosine
+FACE_THRESHOLD=
+FACE_MIN_SIZE=160
+FACE_MIN_BLUR=25
+FACE_MIN_BRIGHTNESS=35
+FACE_MAX_BRIGHTNESS=220
+FACE_MAX_DIMENSION=900
 ```
 
-> Never commit `.env` files, passwords, API keys, face images, or other
-> personal data to GitHub.
+Never commit `.env` files or real credentials.
 
-## Installation
-
-### 1. Install frontend dependencies
+## Setup
 
 ```powershell
 cd client
 npm install
-```
-
-### 2. Install backend dependencies
-
-```powershell
 cd ..\server
 npm install
-```
-
-### 3. Install AI service dependencies
-
-```powershell
 cd ..\ai-service
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-pip install cloudinary python-dotenv
 ```
 
-## Running the Application
+## Run Locally
 
-Open three PowerShell terminals from the project root.
-
-### Terminal 1: AI service
+Open three terminals:
 
 ```powershell
+# Terminal 1
 cd ai-service
 .\venv\Scripts\Activate.ps1
 uvicorn main:app --reload --port 8000
 ```
 
-### Terminal 2: Express server
-
 ```powershell
+# Terminal 2
 cd server
 npm run dev
 ```
 
-### Terminal 3: React client
-
 ```powershell
+# Terminal 3
 cd client
 npm run dev
 ```
 
-Open `http://localhost:5173` in a browser.
+Open:
 
-## API Services
+```text
+http://localhost:5173
+```
 
-| Service | Default URL |
+## Important Local Email Note
+
+Parent approval email buttons use `SERVER_URL`.
+
+For same-laptop testing:
+
+```env
+SERVER_URL=http://localhost:5000
+```
+
+If a parent opens the email on another phone or laptop, `localhost` will not
+point to your backend. Use a deployed backend or your laptop's LAN IP on the
+same Wi-Fi.
+
+## Main URLs
+
+| Service | URL |
 | --- | --- |
-| React client | `http://localhost:5173` |
-| Express API | `http://localhost:5000` |
-| Express health check | `http://localhost:5000/health` |
-| FastAPI service | `http://localhost:8000` |
-| FastAPI documentation | `http://localhost:8000/docs` |
+| Frontend | `http://localhost:5173` |
+| Backend API | `http://localhost:5000/api` |
+| Backend health | `http://localhost:5000/health` |
+| AI service | `http://localhost:8000` |
+| FastAPI docs | `http://localhost:8000/docs` |
 
-## Automatic Checks
+## Checks
 
-The Express server runs scheduled checks to:
+```powershell
+cd server
+npm test
+cd client
+npm run build
+npm run lint
+cd ..
+python -m py_compile ai-service/face/face_utils.py ai-service/routes/face.py ai-service/main.py
+```
 
-- Alert Warden 1 when parents have not responded within one hour
-- Mark approved outpasses as expired after their expiry time
-- Mark students who have not returned by the expiry time as late returns
+Check duplicate active outpasses:
 
-## Security Before Pushing to GitHub
+```powershell
+cd server
+npm run check:active-duplicates
+```
 
-The current project contains local environment files and generated face data.
-Before publishing the repository, ensure these patterns are in `.gitignore`:
+## Production Notes
+
+- Use MongoDB Atlas or another hosted MongoDB for deployed backend.
+- Set `SERVER_URL` to the deployed backend URL so parent email buttons work.
+- Set `CLIENT_URL` to the deployed frontend URL.
+- Use strong `JWT_SECRET`.
+- Keep `.env` values only in the hosting provider environment settings.
+- Gmail SMTP is acceptable for demos, but a transactional email provider is
+  better for real production.
+- Face recognition quality depends on lighting, camera quality, and the
+  registered reference image.
+
+## Git Safety
+
+The repository ignores:
 
 ```gitignore
 .env
 **/.env
 node_modules/
 **/node_modules/
+dist/
+**/dist/
 venv/
 **/venv/
 __pycache__/
@@ -235,20 +243,17 @@ __pycache__/
 **/face/temp/
 ```
 
-If an `.env` file has already been committed, adding it to `.gitignore` is not
-enough. Remove it from Git tracking and rotate every exposed secret before
-publishing the repository.
+If any secret was ever pushed to GitHub, rotate that secret. `.gitignore` only
+prevents future tracking.
 
-## Current Limitations
+## Current Test Status
 
-- The project is intended as a prototype and should receive a security review
-  before production deployment.
-- Face recognition quality depends on lighting, camera quality, and the
-  registered reference image.
-- Email delivery depends on Gmail credentials and sending limits.
-- Automated tests have not yet been added.
+Last local checks performed:
+
+- Backend tests passed
+- Frontend production build passed
+- AI service Python compile check passed
 
 ## License
 
-This project is currently unlicensed. Add a license before distributing or
-accepting external contributions.
+No license has been selected yet.

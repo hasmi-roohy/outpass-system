@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../../../components/Navbar'
 import StatusBadge from '../../../components/StatusBadge'
@@ -16,19 +16,28 @@ export default function ManageStudents() {
   const [filter,    setFilter]    = useState('all')
   const [deleteId,  setDeleteId]  = useState(null)
   const [deleting,  setDeleting]  = useState(false)
+  const [page,      setPage]      = useState(1)
+  const [pagination,setPagination]= useState(null)
 
-  useEffect(() => { fetchStudents() }, [])
-
-  const fetchStudents = async () => {
+  const fetchStudents = useCallback(async () => {
     try {
-      const res = await getAllStudentsApi()
-      setStudents(res.data)
+      setLoading(true)
+      const res = await getAllStudentsApi({
+        page,
+        limit: 20,
+        search,
+        status: filter
+      })
+      setStudents(res.data.items || res.data)
+      setPagination(res.data.pagination || null)
     } catch (err) {
       console.log(err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [page, search, filter])
+
+  useEffect(() => { fetchStudents() }, [fetchStudents])
 
   const handleDelete = async () => {
     setDeleting(true)
@@ -36,6 +45,7 @@ export default function ManageStudents() {
       await deleteStudentApi(deleteId)
       setStudents(students.filter(s => s._id !== deleteId))
       setDeleteId(null)
+      fetchStudents()
     } catch (err) {
       console.log(err)
     } finally {
@@ -43,21 +53,7 @@ export default function ManageStudents() {
     }
   }
 
-  const filtered = students.filter(s => {
-    const matchSearch = search === '' ||
-      s.name?.toLowerCase().includes(search.toLowerCase()) ||
-      s.rollNumber?.toLowerCase().includes(search.toLowerCase()) ||
-      s.email?.toLowerCase().includes(search.toLowerCase()) ||
-      s.department?.toLowerCase().includes(search.toLowerCase())
-
-    const matchFilter = filter === 'all'
-      ? true
-      : filter === 'active'
-      ? s.isActive
-      : !s.isActive
-
-    return matchSearch && matchFilter
-  })
+  const filtered = students
 
   return (
     <div style={s.page}>
@@ -68,7 +64,7 @@ export default function ManageStudents() {
         <div style={s.pageHeader}>
           <div>
             <h1 style={s.pageTitle}>Students</h1>
-            <p style={s.pageSub}>{students.length} registered students</p>
+            <p style={s.pageSub}>{pagination?.total ?? students.length} registered students</p>
           </div>
           <button
             style={s.addBtn}
@@ -83,7 +79,10 @@ export default function ManageStudents() {
           <input
             type='text'
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => {
+              setPage(1)
+              setSearch(e.target.value)
+            }}
             placeholder='Search by name, roll number, email, department...'
             style={s.searchInput}
           />
@@ -97,7 +96,10 @@ export default function ManageStudents() {
                   color:       filter === f ? '#fff'    : '#666',
                   borderColor: filter === f ? '#4f46e5' : '#e0e0e0'
                 }}
-                onClick={() => setFilter(f)}
+                onClick={() => {
+                  setPage(1)
+                  setFilter(f)
+                }}
               >
                 {f.charAt(0).toUpperCase() + f.slice(1)}
               </button>
@@ -108,7 +110,7 @@ export default function ManageStudents() {
         {/* Results count */}
         {search && (
           <p style={s.resultCount}>
-            {filtered.length} result{filtered.length !== 1 ? 's' : ''} for "{search}"
+            {pagination?.total ?? filtered.length} result{(pagination?.total ?? filtered.length) !== 1 ? 's' : ''} for "{search}"
           </p>
         )}
 
@@ -230,6 +232,28 @@ export default function ManageStudents() {
           </div>
         )}
 
+        {pagination && pagination.totalPages > 1 && (
+          <div style={s.pagination}>
+            <button
+              style={s.pageBtn}
+              onClick={() => setPage(page - 1)}
+              disabled={!pagination.hasPrevPage}
+            >
+              Previous
+            </button>
+            <span style={s.pageInfo}>
+              Page {pagination.page} of {pagination.totalPages}
+            </span>
+            <button
+              style={s.pageBtn}
+              onClick={() => setPage(page + 1)}
+              disabled={!pagination.hasNextPage}
+            >
+              Next
+            </button>
+          </div>
+        )}
+
         {/* Delete confirm modal */}
         {deleteId && (
           <div style={s.modalOverlay}>
@@ -312,6 +336,9 @@ const s = {
   actions:       { display: 'flex', gap: '8px', alignItems: 'center' },
   editBtn:       { background: '#f0f0ff', color: '#4f46e5', border: 'none', padding: '7px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' },
   deleteBtn:     { background: '#fff0f0', color: '#dc2626', border: 'none', padding: '7px 10px', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' },
+  pagination:    { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', marginTop: '18px' },
+  pageBtn:       { background: '#fff', color: '#4f46e5', border: '1.5px solid #c7d2fe', padding: '9px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' },
+  pageInfo:      { fontSize: '13px', color: '#666', fontWeight: '600' },
 
   modalOverlay:  { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' },
   modal:         { background: '#fff', borderRadius: '16px', padding: '36px', maxWidth: '380px', width: '100%', textAlign: 'center', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' },

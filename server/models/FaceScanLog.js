@@ -29,4 +29,10 @@ const faceScanLogSchema = new mongoose.Schema({
 
 }, { timestamps: true })
 
+faceScanLogSchema.index({ scannedAt: -1 })
+faceScanLogSchema.index({ studentId: 1, scannedAt: -1 })
+faceScanLogSchema.index({ type: 1, matched: 1, scannedAt: -1 })
+faceScanLogSchema.index({ outpassId: 1, type: 1 })
+faceScanLogSchema.index({ scannedBy: 1, scannedAt: -1 })
+
 module.exports = mongoose.model('FaceScanLog', faceScanLogSchema)

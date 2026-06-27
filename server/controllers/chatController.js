@@ -2,6 +2,10 @@ const axios = require('axios')
 const Outpass = require('../models/Outpass')
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL
+const AI_SERVICE_API_KEY = process.env.AI_SERVICE_API_KEY || ''
+const aiHeaders = AI_SERVICE_API_KEY
+  ? { 'x-ai-service-key': AI_SERVICE_API_KEY }
+  : {}
 
 // @route  POST /api/chat
 // @access Student
@@ -14,7 +18,7 @@ const sendMessage = async (req, res) => {
     const response = await axios.post(`${AI_SERVICE_URL}/chat`, {
       message,
       studentId: studentId.toString()
-    })
+    }, { headers: aiHeaders })
 
     const { intent, reply } = response.data
 

@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Navbar from '../../components/Navbar'
 import StatusBadge from '../../components/StatusBadge'
-import { getMyOutpassesApi } from '../../api/api'
+import { getMyOutpassesApi, studentCancelOutpassApi } from '../../api/api'
 
 export default function MyOutpasses() {
   const navigate = useNavigate()
@@ -11,17 +11,42 @@ export default function MyOutpasses() {
   const [loading,      setLoading]      = useState(true)
   const [activeTab,    setActiveTab]    = useState('all')
   const [expandedId,   setExpandedId]   = useState(null)
+  const [cancellingId, setCancellingId] = useState(null)
+  const [message,      setMessage]      = useState('')
+  const [error,        setError]        = useState('')
+  const [page,         setPage]         = useState(1)
+  const [pagination,   setPagination]   = useState(null)
 
-  useEffect(() => { fetchOutpasses() }, [])
-
-  const fetchOutpasses = async () => {
+  const fetchOutpasses = useCallback(async () => {
     try {
-      const res = await getMyOutpassesApi()
-      setOutpasses(res.data)
+      const res = await getMyOutpassesApi({ page, limit: 20 })
+      setOutpasses(res.data.items || res.data)
+      setPagination(res.data.pagination || null)
     } catch (err) {
-      console.log(err)
+      setError(err.response?.data?.message || 'Failed to load outpasses')
     } finally {
       setLoading(false)
+    }
+  }, [page])
+
+  useEffect(() => { fetchOutpasses() }, [fetchOutpasses])
+
+  const handleCancel = async (outpassId) => {
+    const confirmed = window.confirm('Cancel this outpass request? You can apply again if your monthly used-outpass limit allows it.')
+    if (!confirmed) return
+
+    setCancellingId(outpassId)
+    setMessage('')
+    setError('')
+
+    try {
+      const res = await studentCancelOutpassApi(outpassId, {})
+      setMessage(res.data.message || 'Outpass cancelled')
+      await fetchOutpasses()
+    } catch (err) {
+      setError(err.response?.data?.message || 'Unable to cancel outpass')
+    } finally {
+      setCancellingId(null)
     }
   }
 
@@ -33,6 +58,7 @@ export default function MyOutpasses() {
 
   const activeStatuses  = ['pending', 'warden_forwarded', 'approved', 'out', 'late_return']
   const historyStatuses = ['returned', 'rejected', 'cancelled', 'expired']
+  const studentCancelableStatuses = ['pending', 'warden_forwarded', 'approved']
 
   const filtered = outpasses.filter(o => {
     if (activeTab === 'active')  return activeStatuses.includes(o.status)
@@ -77,7 +103,7 @@ export default function MyOutpasses() {
           <div style={s.headerRow}>
             <div>
               <h1 style={s.pageTitle}>My Outpasses</h1>
-              <p style={s.pageSub}>{outpasses.length} total requests</p>
+              <p style={s.pageSub}>{pagination?.total ?? outpasses.length} total requests</p>
             </div>
             <button
               style={s.applyBtn}
@@ -87,6 +113,10 @@ export default function MyOutpasses() {
             </button>
           </div>
         </div>
+
+        {/* Tabs */}
+        {message && <div style={s.successAlert}>{message}</div>}
+        {error && <div style={s.errorAlert}>{error}</div>}
 
         {/* Tabs */}
         <div style={s.tabRow}>
@@ -149,6 +179,7 @@ export default function MyOutpasses() {
               const isExpanded   = expandedId === outpass._id
               const statusInfo   = getStatusInfo(outpass.status)
               const respondedParent = getParentStatus(outpass)
+              const canCancel = studentCancelableStatuses.includes(outpass.status)
 
               return (
                 <div key={outpass._id} style={s.card}>
@@ -289,12 +320,46 @@ export default function MyOutpasses() {
                         </span>
                       </div>
 
+                      {canCancel && (
+                        <div style={s.actionRow}>
+                          <button
+                            style={s.cancelBtn}
+                            onClick={() => handleCancel(outpass._id)}
+                            disabled={cancellingId === outpass._id}
+                          >
+                            {cancellingId === outpass._id ? 'Cancelling...' : 'Cancel request'}
+                          </button>
+                        </div>
+                      )}
+
                     </div>
                   )}
 
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {pagination && pagination.totalPages > 1 && (
+          <div style={s.pagination}>
+            <button
+              style={s.pageBtn}
+              onClick={() => setPage(page - 1)}
+              disabled={!pagination.hasPrevPage}
+            >
+              Previous
+            </button>
+            <span style={s.pageInfo}>
+              Page {pagination.page} of {pagination.totalPages}
+            </span>
+            <button
+              style={s.pageBtn}
+              onClick={() => setPage(page + 1)}
+              disabled={!pagination.hasNextPage}
+            >
+              Next
+            </button>
           </div>
         )}
 
@@ -317,6 +382,8 @@ const s = {
   tabRow:         { display: 'flex', gap: '8px', marginBottom: '20px' },
   tab:            { display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 18px', border: '1.5px solid', borderRadius: '10px', cursor: 'pointer', fontWeight: '600', fontSize: '14px' },
   tabCount:       { padding: '2px 8px', borderRadius: '20px', fontSize: '12px', fontWeight: '700' },
+  successAlert:   { background: '#f0fff4', border: '1px solid #86efac', color: '#166534', padding: '12px 14px', borderRadius: '10px', marginBottom: '14px', fontSize: '13px', fontWeight: '600' },
+  errorAlert:     { background: '#fff0f0', border: '1px solid #fecaca', color: '#dc2626', padding: '12px 14px', borderRadius: '10px', marginBottom: '14px', fontSize: '13px', fontWeight: '600' },
 
   loadingBox:     { textAlign: 'center', padding: '60px' },
   spinner:        { width: '36px', height: '36px', border: '3px solid #e0e0e0', borderTop: '3px solid #4f46e5', borderRadius: '50%', margin: '0 auto 16px', animation: 'spin 1s linear infinite' },
@@ -358,5 +425,10 @@ const s = {
 
   expiryBox:      { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8f9ff', padding: '10px 14px', borderRadius: '8px' },
   expiryLabel:    { fontSize: '12px', color: '#888', fontWeight: '600' },
-  expiryVal:      { fontSize: '13px', fontWeight: '700' }
+  expiryVal:      { fontSize: '13px', fontWeight: '700' },
+  actionRow:      { display: 'flex', justifyContent: 'flex-end', marginTop: '12px' },
+  cancelBtn:      { background: '#fff', color: '#dc2626', border: '1.5px solid #fecaca', padding: '9px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' },
+  pagination:     { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', marginTop: '18px' },
+  pageBtn:        { background: '#fff', color: '#4f46e5', border: '1.5px solid #c7d2fe', padding: '9px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' },
+  pageInfo:       { fontSize: '13px', color: '#666', fontWeight: '600' }
 }

@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const BASE_URL = 'http://localhost:5000/api'
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
 // Create axios instance
 const api = axios.create({
@@ -9,7 +9,13 @@ const api = axios.create({
 
 // Automatically add token to every request
 api.interceptors.request.use((config) => {
-  const user = JSON.parse(localStorage.getItem('user'))
+  let user = null
+  try {
+    user = JSON.parse(localStorage.getItem('user'))
+  } catch {
+    localStorage.removeItem('user')
+  }
+
   if (user?.token) {
     config.headers.Authorization = `Bearer ${user.token}`
   }
@@ -21,23 +27,28 @@ api.interceptors.request.use((config) => {
 // ─────────────────────────────────────
 export const loginApi    = (data) => api.post('/auth/login', data)
 export const registerApi = (data) => api.post('/auth/register', data)
+export const getMeApi    = ()     => api.get('/auth/me')
 
 // ─────────────────────────────────────
 // OUTPASS
 // ─────────────────────────────────────
 export const applyOutpassApi           = (data)       => api.post('/outpass/apply', data)
-export const getMyOutpassesApi         = ()           => api.get('/outpass/my')
+export const getMyOutpassesApi         = (params)     => api.get('/outpass/my', { params })
+export const studentCancelOutpassApi   = (id, data)   => api.put(`/outpass/${id}/student-cancel`, data)
 export const getPendingOutpassesApi    = ()           => api.get('/outpass/pending')
 export const getRejectedParentsApi     = ()           => api.get('/outpass/rejected-parents')
 export const forwardToParentsApi       = (id, data)   => api.put(`/outpass/${id}/forward`, data)
+export const resendParentEmailsApi     = (id)         => api.post(`/outpass/${id}/resend-parent-emails`)
 export const rejectOutpassApi          = (id, data)   => api.put(`/outpass/${id}/reject`, data)
 export const callApproveApi            = (id, data)   => api.put(`/outpass/${id}/call-approve`, data)
+export const adminEmergencyApproveApi  = (id, data)   => api.put(`/outpass/${id}/admin-emergency-approve`, data)
 export const cancelOutpassApi          = (id, data)   => api.put(`/outpass/${id}/cancel`, data)
 export const getOutpassByTokenApi      = (token)      => api.get(`/outpass/parent/${token}`)
 export const parentRespondApi          = (token, data)=> api.put(`/outpass/parent/${token}`, data)
 export const getNoResponseOutpassesApi = ()           => api.get('/outpass/no-response')
 export const getOutpassByRollNumberApi = (rollNumber) => api.get(`/outpass/by-rollnumber/${rollNumber}`)
-export const getMyStudentsOutpassesApi = ()           => api.get('/outpass/my-students')
+export const getMyStudentsOutpassesApi = (params)     => api.get('/outpass/my-students', { params })
+export const getSingleOutpassApi       = (id)         => api.get(`/outpass/${id}`)
 
 // ─────────────────────────────────────
 // FACE
@@ -45,7 +56,6 @@ export const getMyStudentsOutpassesApi = ()           => api.get('/outpass/my-st
 export const verifyExitApi        = (data) => api.post('/face/verify-exit', data)
 export const verifyReturnApi      = (data) => api.post('/face/verify-return', data)
 export const manualOverrideApi    = (data) => api.post('/face/manual-override', data)
-export const verifyParentFaceApi  = (data) => api.post('/face/verify-parent', data)
 
 // ─────────────────────────────────────
 // CHAT
@@ -56,11 +66,12 @@ export const sendChatMessageApi = (data) => api.post('/chat', data)
 // ADMIN
 // ─────────────────────────────────────
 export const getDashboardStatsApi = () => api.get('/admin')
-export const getAllOutpassesApi   = () => api.get('/admin/outpasses')
-export const getAllScanLogsApi    = () => api.get('/admin/scanlogs')
+export const getAllOutpassesApi   = (params) => api.get('/admin/outpasses', { params })
+export const getAllScanLogsApi    = (params) => api.get('/admin/scanlogs', { params })
 
 // Students
-export const getAllStudentsApi = ()         => api.get('/admin/students')
+export const getAllStudentsApi = (params)  => api.get('/admin/students', { params })
+export const getStudentByIdApi = (id)      => api.get(`/admin/students/${id}`)
 export const addStudentApi    = (data)     => api.post('/admin/students', data)
 export const editStudentApi   = (id, data) => api.put(`/admin/students/${id}`, data)
 export const deleteStudentApi = (id)       => api.delete(`/admin/students/${id}`)

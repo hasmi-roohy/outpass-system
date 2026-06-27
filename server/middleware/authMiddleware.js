@@ -18,6 +18,10 @@ const protect = async (req, res, next) => {
       // Get user from token
       req.user = await User.findById(decoded.id).select('-password')
 
+      if (!req.user || !req.user.isActive) {
+        return res.status(401).json({ message: 'Not authorized, account unavailable' })
+      }
+
       next()
     } else {
       res.status(401).json({ message: 'Not authorized, no token' })

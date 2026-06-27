@@ -30,6 +30,7 @@ requiredEnvVars.forEach(key => {
 console.log('✅ Environment variables validated')
 
 const app = express()
+app.set('trust proxy', 1)
 
 // ─────────────────────────────────────
 // Rate Limiting
@@ -65,7 +66,19 @@ const faceLimiter = rateLimit({
 // ─────────────────────────────────────
 // Middleware
 // ─────────────────────────────────────
-app.use(cors({ origin: process.env.CLIENT_URL }))
+const allowedOrigins = process.env.CLIENT_URL
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean)
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true)
+    }
+    return callback(new Error('Not allowed by CORS'))
+  }
+}))
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ limit: '50mb', extended: true }))
 
@@ -87,9 +100,12 @@ app.use('/api/chat',    require('./routes/chat'))
 // Health check
 // ─────────────────────────────────────
 app.get('/health', (req, res) => {
-  res.status(200).json({
-    status:  'ok',
+  const databaseConnected = mongoose.connection.readyState === 1
+
+  res.status(databaseConnected ? 200 : 503).json({
+    status:  databaseConnected ? 'ok' : 'degraded',
     service: 'Outpass Management API',
+    database: databaseConnected ? 'connected' : 'disconnected',
     time:    new Date().toISOString()
   })
 })
@@ -126,6 +142,32 @@ cron.schedule('*/5 * * * *', async () => {
         outpass.parentNoResponse.alertedAt = new Date()
         await outpass.save()
         console.log(`⚠️ No parent response alert: ${outpass._id}`)
+      }
+    }
+
+    // Close parent-forwarded requests after all pending parent links expire.
+    const now = new Date()
+    const staleParentOutpasses = await Outpass.find({
+      status: 'warden_forwarded',
+      parentTokens: { $ne: [] }
+    })
+
+    for (const outpass of staleParentOutpasses) {
+      const pendingParents = outpass.parentTokens.filter(parent => parent.status === 'pending')
+      const allPendingLinksExpired = pendingParents.length > 0 && pendingParents.every(
+        parent => parent.expiresAt && parent.expiresAt < now
+      )
+
+      if (allPendingLinksExpired) {
+        outpass.status = 'expired'
+        outpass.parentNoResponse.alerted = true
+        outpass.parentNoResponse.alertedAt = outpass.parentNoResponse.alertedAt || now
+        outpass.wardenFinalDecision.done = true
+        outpass.wardenFinalDecision.decision = 'parent_link_expired'
+        outpass.wardenFinalDecision.note = 'Parent approval links expired before any response'
+        outpass.wardenFinalDecision.decidedAt = now
+        await outpass.save()
+        console.log(`Auto-expired stale parent approval links for outpass: ${outpass._id}`)
       }
     }
 

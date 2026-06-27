@@ -1,35 +1,33 @@
-import { useState, useEffect, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { getOutpassByTokenApi, parentRespondApi, verifyParentFaceApi } from '../../api/api'
+import { useEffect, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router-dom'
+import { getOutpassByTokenApi, parentRespondApi } from '../../api/api'
 
 export default function ParentApproval() {
   const [searchParams] = useSearchParams()
+  const location = useLocation()
   const token = searchParams.get('token')
+  const initialAction = location.pathname.includes('/reject') ? 'rejected' : 'approved'
 
-  const videoRef  = useRef(null)
-  const canvasRef = useRef(null)
-
-  const [outpass,      setOutpass]      = useState(null)
-  const [loading,      setLoading]      = useState(true)
-  const [error,        setError]        = useState('')
-  const [message,      setMessage]      = useState('')
-  const [acting,       setActing]       = useState(false)
-  const [reason,       setReason]       = useState('')
-  const [responded,    setResponded]    = useState(false)
-  const [streaming,    setStreaming]    = useState(false)
-  const [faceResult,   setFaceResult]   = useState(null)
-  const [scanning,     setScanning]     = useState(false)
-  const [faceVerified, setFaceVerified] = useState(false)
-  const [step,         setStep]         = useState('details')
+  const [outpass, setOutpass] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [acting, setActing] = useState(false)
+  const [reason, setReason] = useState('')
+  const [selectedAction, setSelectedAction] = useState(initialAction)
 
   useEffect(() => {
     if (token) fetchOutpass()
+    else {
+      setError('Invalid approval link')
+      setLoading(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
-  // Add viewport meta for mobile
   useEffect(() => {
     const meta = document.createElement('meta')
-    meta.name    = 'viewport'
+    meta.name = 'viewport'
     meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0'
     document.head.appendChild(meta)
     return () => document.head.removeChild(meta)
@@ -46,458 +44,192 @@ export default function ParentApproval() {
     }
   }
 
-  const startCamera = async () => {
-    try {
-      // ← facingMode: 'user' uses front camera on mobile
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode:  'user',
-          width:       { ideal: 640 },
-          height:      { ideal: 480 }
-        }
-      })
-      videoRef.current.srcObject = stream
-      videoRef.current.play()
-      setStreaming(true)
-    } catch (err) {
-      alert('Camera access denied. Please allow camera access in your browser settings.')
-    }
-  }
-
-  const stopCamera = () => {
-    const stream = videoRef.current?.srcObject
-    stream?.getTracks().forEach(track => track.stop())
-    setStreaming(false)
-  }
-
-  const handleFaceScan = async () => {
-    setScanning(true)
-    setFaceResult(null)
-
-    try {
-      const canvas  = canvasRef.current
-      const video   = videoRef.current
-      canvas.width  = video.videoWidth
-      canvas.height = video.videoHeight
-      canvas.getContext('2d').drawImage(video, 0, 0)
-      const image = canvas.toDataURL('image/jpeg')
-
-      const parentToken = outpass.parentTokens.find(p => p.token === token)
-      if (!parentToken) {
-        setFaceResult({ matched: false, message: 'Invalid parent token' })
-        setScanning(false)
-        return
-      }
-      const parentIndex = outpass.parentTokens.indexOf(parentToken)
-
-      const studentId = outpass.studentId?._id
-        ? outpass.studentId._id.toString()
-        : outpass.studentId?.toString()
-
-      if (!studentId) {
-        setFaceResult({ matched: false, message: 'Student ID not found' })
-        setScanning(false)
-        return
-      }
-
-      const res = await verifyParentFaceApi({ image, studentId, parentIndex })
-      const result = res.data
-      setFaceResult(result)
-
-      if (result.matched) {
-        setFaceVerified(true)
-        stopCamera()
-        setStep('respond')
-      }
-
-    } catch (err) {
-      setFaceResult({
-        matched: false,
-        message: err.response?.data?.message || 'Face verification failed. Please try again.'
-      })
-    } finally {
-      setScanning(false)
-    }
-  }
-
   const handleRespond = async (status) => {
     setActing(true)
+    setError('')
     try {
-      await parentRespondApi(token, { status, rejectionReason: reason })
-      setResponded(true)
+      await parentRespondApi(token, {
+        status,
+        rejectionReason: status === 'rejected' ? reason : ''
+      })
       setMessage(
         status === 'approved'
-          ? '✅ You have approved the outpass request.'
-          : '❌ You have rejected the outpass request. The warden will be notified.'
+          ? 'You have approved the outpass request.'
+          : 'You have declined the outpass request. The warden will be notified.'
       )
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to respond')
+      setError(err.response?.data?.message || 'Failed to submit response')
     } finally {
       setActing(false)
     }
   }
 
-  // ── Loading ──
-  if (loading) return (
-    <div style={s.center}>
-      <div style={s.loadingCard}>
-        <div style={s.spinner} />
-        <p style={s.loadingText}>Loading request details...</p>
-      </div>
-    </div>
-  )
-
-  // ── Error ──
-  if (error) return (
-    <div style={s.center}>
-      <div style={s.errorCard}>
-        <div style={s.bigIcon}>⚠️</div>
-        <h2 style={s.errorTitle}>Link Error</h2>
-        <p style={s.errorMsg}>{error}</p>
-      </div>
-    </div>
-  )
-
-  // ── Responded ──
-  if (responded) return (
-    <div style={s.center}>
-      <div style={s.successCard}>
-        <div style={s.bigIcon}>
-          {message.startsWith('✅') ? '✅' : '❌'}
+  if (loading) {
+    return (
+      <div style={s.center}>
+        <div style={s.stateCard}>
+          <div style={s.spinner} />
+          <p style={s.muted}>Loading request details...</p>
         </div>
-        <h2 style={s.successTitle}>Response Submitted</h2>
-        <p style={s.successMsg}>{message}</p>
-        <p style={s.closeTip}>You can close this page now.</p>
       </div>
-    </div>
-  )
+    )
+  }
+
+  if (error && !outpass) {
+    return (
+      <div style={s.center}>
+        <div style={s.stateCard}>
+          <h2 style={s.errorTitle}>Link Error</h2>
+          <p style={s.muted}>{error}</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (message) {
+    return (
+      <div style={s.center}>
+        <div style={s.stateCard}>
+          <h2 style={s.successTitle}>Response Submitted</h2>
+          <p style={s.message}>{message}</p>
+          <p style={s.muted}>You can close this page now.</p>
+        </div>
+      </div>
+    )
+  }
 
   const student = outpass?.studentId
 
   return (
     <div style={s.page}>
       <div style={s.card}>
-
-        {/* Header */}
-        <div style={s.header}>
-          <div style={s.headerIcon}>🎓</div>
+        <header style={s.header}>
+          <div style={s.logo}>OMS</div>
           <h1 style={s.title}>Outpass Request</h1>
-          <p style={s.subtitle}>Your ward needs your approval</p>
-        </div>
+          <p style={s.subtitle}>Please review and respond.</p>
+        </header>
 
-        {/* Step indicators */}
-        <div style={s.steps}>
-          {['Details', 'Verify', 'Respond'].map((label, i) => {
-            const stepIdx = step === 'details' ? 0 : step === 'scan' ? 1 : 2
-            return (
-              <div key={i} style={s.stepItem}>
-                <div style={{
-                  ...s.stepDot,
-                  background: i <= stepIdx ? '#4f46e5' : '#e0e0e0',
-                  color:      i <= stepIdx ? '#fff'    : '#999'
-                }}>
-                  {i < stepIdx ? '✓' : i + 1}
-                </div>
-                <span style={{
-                  ...s.stepLabel,
-                  color: i <= stepIdx ? '#4f46e5' : '#999',
-                  fontWeight: i === stepIdx ? '600' : '400'
-                }}>
-                  {label}
-                </span>
-              </div>
-            )
-          })}
-        </div>
+        <main style={s.body}>
+          {error && <div style={s.errorBox}>{error}</div>}
 
-        {/* ── Step 1: Details ── */}
-        {step === 'details' && (
-          <div style={s.body}>
+          <section style={s.infoCard}>
+            <h2 style={s.sectionTitle}>Student</h2>
+            <Info label='Name' value={student?.name} />
+            <Info label='Roll No' value={student?.rollNumber} />
+            <Info label='Department' value={student?.department} />
+          </section>
 
-            <div style={s.infoCard}>
-              <div style={s.infoCardTitle}>👤 Student</div>
-              <div style={s.infoRow}>
-                <span style={s.infoKey}>Name</span>
-                <span style={s.infoVal}>{student?.name}</span>
-              </div>
-              <div style={s.infoRow}>
-                <span style={s.infoKey}>Roll No</span>
-                <span style={s.infoVal}>{student?.rollNumber}</span>
-              </div>
-              <div style={s.infoRow}>
-                <span style={s.infoKey}>Department</span>
-                <span style={s.infoVal}>{student?.department}</span>
-              </div>
-            </div>
+          <section style={s.infoCard}>
+            <h2 style={s.sectionTitle}>Request Details</h2>
+            <Info label='Reason' value={outpass?.reason} />
+            <Info label='Destination' value={outpass?.destination} />
+            <Info label='From' value={new Date(outpass?.fromDate).toDateString()} />
+            <Info label='To' value={new Date(outpass?.toDate).toDateString()} />
+          </section>
 
-            <div style={s.infoCard}>
-              <div style={s.infoCardTitle}>📋 Request Details</div>
-              <div style={s.infoRow}>
-                <span style={s.infoKey}>Reason</span>
-                <span style={s.infoVal}>{outpass?.reason}</span>
-              </div>
-              <div style={s.infoRow}>
-                <span style={s.infoKey}>Destination</span>
-                <span style={s.infoVal}>{outpass?.destination}</span>
-              </div>
-              <div style={s.infoRow}>
-                <span style={s.infoKey}>From</span>
-                <span style={s.infoVal}>
-                  {new Date(outpass?.fromDate).toDateString()}
-                </span>
-              </div>
-              <div style={s.infoRow}>
-                <span style={s.infoKey}>To</span>
-                <span style={s.infoVal}>
-                  {new Date(outpass?.toDate).toDateString()}
-                </span>
-              </div>
-            </div>
+          {outpass?.wardenNote && (
+            <section style={s.noteBox}>
+              <strong>Warden Note</strong>
+              <p>{outpass.wardenNote}</p>
+            </section>
+          )}
 
-            {outpass?.wardenNote && (
-              <div style={s.wardenNote}>
-                <span style={s.wardenNoteLabel}>📝 Warden Note</span>
-                <p style={s.wardenNoteText}>{outpass.wardenNote}</p>
-              </div>
-            )}
-
+          <div style={s.choiceRow}>
             <button
-              style={s.primaryBtn}
-              onClick={() => { setStep('scan'); startCamera() }}
+              style={{
+                ...s.choiceBtn,
+                ...(selectedAction === 'approved' ? s.approveChoiceActive : s.choiceInactive)
+              }}
+              onClick={() => setSelectedAction('approved')}
+              type='button'
             >
-              🎥 Verify Face to Continue
+              Approve
             </button>
-
-            <p style={s.tip}>
-              Your face will be matched against your registered photo
-            </p>
+            <button
+              style={{
+                ...s.choiceBtn,
+                ...(selectedAction === 'rejected' ? s.rejectChoiceActive : s.choiceInactive)
+              }}
+              onClick={() => setSelectedAction('rejected')}
+              type='button'
+            >
+              Decline
+            </button>
           </div>
-        )}
 
-        {/* ── Step 2: Face Scan ── */}
-        {step === 'scan' && (
-          <div style={s.body}>
-            <p style={s.scanInstructions}>
-              📱 Hold your phone at eye level and look straight at the camera
-            </p>
-
-            {/* Camera box */}
-            <div style={s.cameraBox}>
-              <video
-                ref={videoRef}
-                style={s.video}
-                muted
-                playsInline      // ← required for iOS Safari
-                autoPlay
+          {selectedAction === 'rejected' && (
+            <label style={s.reasonField}>
+              <span>Reason for decline</span>
+              <textarea
+                value={reason}
+                onChange={event => setReason(event.target.value)}
+                placeholder='Optional reason...'
+                style={s.textarea}
               />
-              {!streaming && (
-                <div style={s.cameraPlaceholder}>
-                  📷 Starting camera...
-                </div>
-              )}
-            </div>
-
-            <canvas ref={canvasRef} style={{ display: 'none' }} />
-
-            {/* Face result feedback */}
-            {faceResult && !faceResult.matched && (
-              <div style={s.faceError}>
-                <div style={s.faceErrorIcon}>❌</div>
-                <div>
-                  <strong>Face did not match</strong>
-                  <p style={s.faceErrorSub}>
-                    {faceResult.message || 'Please ensure good lighting and look directly at the camera'}
-                  </p>
-                  {faceResult.confidence > 0 && (
-                    <p style={s.faceErrorSub}>
-                      Confidence: {faceResult.confidence}%
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <button
-              style={{
-                ...s.primaryBtn,
-                background: scanning ? '#888' : '#4f46e5',
-                cursor:     (scanning || !streaming) ? 'not-allowed' : 'pointer'
-              }}
-              onClick={handleFaceScan}
-              disabled={scanning || !streaming}
-            >
-              {scanning ? '⏳ Scanning...' : '🔍 Scan My Face'}
-            </button>
-
-            <button
-              style={s.ghostBtn}
-              onClick={() => { stopCamera(); setStep('details') }}
-            >
-              ← Go Back
-            </button>
-
-            <p style={s.tip}>
-              Make sure your face is well lit and clearly visible
-            </p>
-          </div>
-        )}
-
-        {/* ── Step 3: Respond ── */}
-        {step === 'respond' && faceVerified && (
-          <div style={s.body}>
-
-            <div style={s.verifiedBadge}>
-              <span style={s.verifiedIcon}>✅</span>
-              <div>
-                <div style={s.verifiedTitle}>Identity Verified</div>
-                <div style={s.verifiedSub}>
-                  Confidence: {faceResult?.confidence}%
-                </div>
-              </div>
-            </div>
-
-            <p style={s.respondPrompt}>
-              Do you approve your ward's outpass request?
-            </p>
-
-            {/* Summary */}
-            <div style={s.summaryBox}>
-              <div style={s.summaryRow}>
-                <span>📍</span>
-                <span>{outpass?.destination}</span>
-              </div>
-              <div style={s.summaryRow}>
-                <span>📅</span>
-                <span>
-                  {new Date(outpass?.fromDate).toDateString()} →{' '}
-                  {new Date(outpass?.toDate).toDateString()}
-                </span>
-              </div>
-            </div>
-
-            <label style={s.reasonLabel}>
-              Reason for rejection (fill only if rejecting)
             </label>
-            <textarea
-              value={reason}
-              onChange={e => setReason(e.target.value)}
-              placeholder='Optional rejection reason...'
-              style={s.textarea}
-            />
+          )}
 
-            <button
-              style={{
-                ...s.approveBtn,
-                opacity: acting ? 0.7 : 1,
-                cursor:  acting ? 'not-allowed' : 'pointer'
-              }}
-              onClick={() => handleRespond('approved')}
-              disabled={acting}
-            >
-              ✅ Approve Outpass
-            </button>
+          <button
+            style={{
+              ...s.submitBtn,
+              background: selectedAction === 'approved' ? '#16a34a' : '#dc2626',
+              opacity: acting ? 0.7 : 1
+            }}
+            onClick={() => handleRespond(selectedAction)}
+            disabled={acting}
+          >
+            {acting
+              ? 'Submitting...'
+              : selectedAction === 'approved'
+              ? 'Submit Approval'
+              : 'Submit Decline'}
+          </button>
 
-            <button
-              style={{
-                ...s.rejectBtn,
-                opacity: acting ? 0.7 : 1,
-                cursor:  acting ? 'not-allowed' : 'pointer'
-              }}
-              onClick={() => handleRespond('rejected')}
-              disabled={acting}
-            >
-              ❌ Reject Outpass
-            </button>
-
-            <p style={s.tip}>
-              Once you respond, other guardians cannot respond
-            </p>
-          </div>
-        )}
-
+          <p style={s.tip}>Once you respond, other guardians cannot respond to this request.</p>
+        </main>
       </div>
     </div>
   )
 }
 
-// ─────────────────────────────────────
-// Mobile-first styles
-// ─────────────────────────────────────
+function Info({ label, value }) {
+  return (
+    <div style={s.infoRow}>
+      <span style={s.infoKey}>{label}</span>
+      <span style={s.infoVal}>{value || '-'}</span>
+    </div>
+  )
+}
+
 const s = {
-  page:            { minHeight: '100vh', background: '#f0f2f5', padding: '16px', boxSizing: 'border-box' },
-  center:          { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', boxSizing: 'border-box' },
-  card:            { background: '#fff', borderRadius: '16px', boxShadow: '0 4px 24px rgba(0,0,0,0.10)', width: '100%', maxWidth: '480px', margin: '0 auto', overflow: 'hidden' },
-
-  // Header
-  header:          { background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', padding: '28px 24px 20px', textAlign: 'center' },
-  headerIcon:      { fontSize: '36px', marginBottom: '8px' },
-  title:           { color: '#fff', fontSize: '22px', fontWeight: 'bold', margin: '0 0 4px' },
-  subtitle:        { color: 'rgba(255,255,255,0.8)', fontSize: '14px', margin: 0 },
-
-  // Step indicators
-  steps:           { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '16px 24px', borderBottom: '1px solid #f0f0f0' },
-  stepItem:        { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' },
-  stepDot:         { width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold' },
-  stepLabel:       { fontSize: '11px' },
-
-  // Body
-  body:            { padding: '20px 20px 28px' },
-
-  // Info cards
-  infoCard:        { background: '#f8f9ff', borderRadius: '10px', padding: '14px', marginBottom: '12px' },
-  infoCardTitle:   { fontSize: '13px', fontWeight: '600', color: '#4f46e5', marginBottom: '10px' },
-  infoRow:         { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '5px 0', borderBottom: '1px solid #eee', gap: '12px' },
-  infoKey:         { fontSize: '13px', color: '#888', flexShrink: 0 },
-  infoVal:         { fontSize: '13px', color: '#333', fontWeight: '500', textAlign: 'right' },
-
-  // Warden note
-  wardenNote:      { background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '10px', padding: '12px', marginBottom: '16px' },
-  wardenNoteLabel: { fontSize: '12px', fontWeight: '600', color: '#f59e0b' },
-  wardenNoteText:  { fontSize: '13px', color: '#555', margin: '4px 0 0' },
-
-  // Camera
-  scanInstructions:{ fontSize: '14px', color: '#555', textAlign: 'center', marginBottom: '14px', lineHeight: '1.5' },
-  cameraBox:       { background: '#111', borderRadius: '12px', overflow: 'hidden', marginBottom: '14px', minHeight: '260px', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  video:           { width: '100%', height: 'auto', display: 'block' },
-  cameraPlaceholder:{ color: '#666', fontSize: '14px', textAlign: 'center', padding: '20px' },
-
-  // Face error
-  faceError:       { background: '#fff0f0', border: '1px solid #ffcdd2', borderRadius: '10px', padding: '12px', marginBottom: '14px', display: 'flex', gap: '10px', alignItems: 'flex-start' },
-  faceErrorIcon:   { fontSize: '20px', flexShrink: 0 },
-  faceErrorSub:    { fontSize: '12px', color: '#721c24', margin: '4px 0 0' },
-
-  // Verified badge
-  verifiedBadge:   { background: '#f0fff4', border: '1px solid #86efac', borderRadius: '10px', padding: '14px', marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center' },
-  verifiedIcon:    { fontSize: '28px' },
-  verifiedTitle:   { fontSize: '15px', fontWeight: '600', color: '#166534' },
-  verifiedSub:     { fontSize: '12px', color: '#166534', marginTop: '2px' },
-
-  // Respond
-  respondPrompt:   { fontSize: '15px', color: '#333', fontWeight: '500', marginBottom: '14px', textAlign: 'center' },
-  summaryBox:      { background: '#f8f9ff', borderRadius: '10px', padding: '12px', marginBottom: '16px' },
-  summaryRow:      { display: 'flex', gap: '10px', fontSize: '13px', color: '#555', padding: '4px 0' },
-  reasonLabel:     { display: 'block', fontSize: '13px', color: '#666', marginBottom: '8px' },
-  textarea:        { width: '100%', padding: '12px', border: '1px solid #ddd', borderRadius: '10px', fontSize: '15px', minHeight: '80px', boxSizing: 'border-box', resize: 'vertical', marginBottom: '16px', fontFamily: 'inherit' },
-
-  // Buttons
-  primaryBtn:      { width: '100%', background: '#4f46e5', color: '#fff', border: 'none', padding: '16px', borderRadius: '12px', fontSize: '16px', fontWeight: '600', cursor: 'pointer', marginBottom: '10px', display: 'block' },
-  ghostBtn:        { width: '100%', background: 'transparent', color: '#666', border: '1px solid #ddd', padding: '14px', borderRadius: '12px', fontSize: '15px', cursor: 'pointer', marginBottom: '10px', display: 'block' },
-  approveBtn:      { width: '100%', background: '#16a34a', color: '#fff', border: 'none', padding: '18px', borderRadius: '12px', fontSize: '17px', fontWeight: '700', cursor: 'pointer', marginBottom: '12px', display: 'block' },
-  rejectBtn:       { width: '100%', background: '#dc2626', color: '#fff', border: 'none', padding: '18px', borderRadius: '12px', fontSize: '17px', fontWeight: '700', cursor: 'pointer', marginBottom: '12px', display: 'block' },
-  tip:             { fontSize: '12px', color: '#aaa', textAlign: 'center', marginTop: '8px' },
-
-  // Loading
-  loadingCard:     { textAlign: 'center', padding: '40px' },
-  spinner:         { width: '40px', height: '40px', border: '4px solid #e0e0e0', borderTop: '4px solid #4f46e5', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 16px' },
-  loadingText:     { color: '#888', fontSize: '15px' },
-
-  // Error / Success
-  errorCard:       { background: '#fff', borderRadius: '16px', padding: '40px 30px', textAlign: 'center', maxWidth: '360px', boxShadow: '0 4px 16px rgba(0,0,0,0.1)' },
-  bigIcon:         { fontSize: '48px', marginBottom: '12px' },
-  errorTitle:      { fontSize: '20px', fontWeight: 'bold', color: '#333', marginBottom: '8px' },
-  errorMsg:        { fontSize: '14px', color: '#888' },
-  successCard:     { background: '#fff', borderRadius: '16px', padding: '40px 30px', textAlign: 'center', maxWidth: '360px', boxShadow: '0 4px 16px rgba(0,0,0,0.1)' },
-  successTitle:    { fontSize: '20px', fontWeight: 'bold', color: '#333', marginBottom: '8px' },
-  successMsg:      { fontSize: '15px', color: '#555', marginBottom: '8px' },
-  closeTip:        { fontSize: '13px', color: '#aaa' }
+  page: { minHeight: '100vh', background: '#f4f7fb', padding: '18px', boxSizing: 'border-box' },
+  center: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', boxSizing: 'border-box', background: '#f4f7fb' },
+  card: { width: '100%', maxWidth: '500px', margin: '0 auto', background: '#fff', borderRadius: '12px', overflow: 'hidden', border: '1px solid #e3e8f0', boxShadow: '0 18px 48px rgba(15,23,42,0.10)' },
+  header: { background: '#2563eb', padding: '26px 22px', textAlign: 'center', color: '#fff' },
+  logo: { width: 44, height: 40, margin: '0 auto 12px', borderRadius: 8, background: 'rgba(255,255,255,0.16)', display: 'grid', placeItems: 'center', fontWeight: 900, fontSize: 12 },
+  title: { margin: '0 0 6px', fontSize: 24, lineHeight: 1.15 },
+  subtitle: { margin: 0, color: 'rgba(255,255,255,0.82)', fontSize: 14 },
+  body: { padding: '20px' },
+  infoCard: { background: '#f8fafc', border: '1px solid #e3e8f0', borderRadius: 10, padding: 14, marginBottom: 12 },
+  sectionTitle: { margin: '0 0 10px', color: '#2563eb', fontSize: 14, fontWeight: 900 },
+  infoRow: { display: 'flex', justifyContent: 'space-between', gap: 12, padding: '7px 0', borderTop: '1px solid #e3e8f0' },
+  infoKey: { color: '#64748b', fontSize: 13, flexShrink: 0 },
+  infoVal: { color: '#172033', fontSize: 13, fontWeight: 800, textAlign: 'right' },
+  noteBox: { padding: 14, marginBottom: 14, borderRadius: 10, background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontSize: 13 },
+  choiceRow: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, margin: '16px 0' },
+  choiceBtn: { minHeight: 48, borderRadius: 8, cursor: 'pointer', fontSize: 15, fontWeight: 900 },
+  choiceInactive: { background: '#fff', color: '#475569', border: '1px solid #cbd5e1' },
+  approveChoiceActive: { background: '#ecfdf5', color: '#047857', border: '2px solid #16a34a' },
+  rejectChoiceActive: { background: '#fef2f2', color: '#b91c1c', border: '2px solid #dc2626' },
+  reasonField: { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14, color: '#334155', fontSize: 13, fontWeight: 800 },
+  textarea: { width: '100%', minHeight: 86, padding: 12, borderRadius: 8, border: '1px solid #cbd5e1', resize: 'vertical', font: 'inherit', boxSizing: 'border-box' },
+  submitBtn: { width: '100%', minHeight: 50, color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 16, fontWeight: 900 },
+  tip: { margin: '12px 0 0', color: '#64748b', textAlign: 'center', fontSize: 12 },
+  errorBox: { marginBottom: 12, padding: 12, borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 13, fontWeight: 800 },
+  stateCard: { width: '100%', maxWidth: 380, padding: 32, borderRadius: 12, background: '#fff', border: '1px solid #e3e8f0', boxShadow: '0 18px 48px rgba(15,23,42,0.10)', textAlign: 'center' },
+  spinner: { width: 36, height: 36, border: '3px solid #e3e8f0', borderTopColor: '#2563eb', borderRadius: '50%', margin: '0 auto 14px', animation: 'ui-spin 0.8s linear infinite' },
+  errorTitle: { margin: '0 0 8px', color: '#b91c1c', fontSize: 21 },
+  successTitle: { margin: '0 0 8px', color: '#047857', fontSize: 21 },
+  message: { color: '#334155', fontSize: 15 },
+  muted: { color: '#64748b', fontSize: 14 }
 }

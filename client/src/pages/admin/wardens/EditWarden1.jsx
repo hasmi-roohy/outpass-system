@@ -14,7 +14,11 @@ export default function EditWarden1() {
   const [error,   setError]   = useState('')
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => { fetchWarden() }, [])
+  useEffect(() => {
+    fetchWarden()
+    // Warden data should reload only when the route ID changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
 
   const fetchWarden = async () => {
     try {
