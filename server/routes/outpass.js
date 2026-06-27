@@ -44,10 +44,10 @@ router.put('/:id/admin-emergency-approve', protect, authorizeRoles('admin'), adm
 router.get('/by-rollnumber/:rollNumber', protect, authorizeRoles('warden2'), getOutpassByRollNumber)
 
 // Parent routes (public - token based)
-router.get('/parent/:token', getOutpassByToken)
-router.put('/parent/:token', parentRespond)
 router.get('/parent/:token/approve-direct', parentApproveDirect)
 router.get('/parent/:token/reject-direct', parentRejectDirect)
+router.get('/parent/:token', getOutpassByToken)
+router.put('/parent/:token', parentRespond)
 
 
 

@@ -66,7 +66,7 @@ const verifyExit = async (req, res) => {
 
     // Face did not match
     return res.status(200).json({
-      message:    'Face did not match! Manual verification needed.',
+      message:    result.message || 'Face did not match! Manual verification needed.',
       matched:    false,
       confidence: result.confidence,
       scanLogId:  scanLog._id
@@ -135,7 +135,7 @@ const verifyReturn = async (req, res) => {
 
     // Face did not match
     return res.status(200).json({
-      message:    'Face did not match! Manual verification needed.',
+      message:    result.message || 'Face did not match! Manual verification needed.',
       matched:    false,
       confidence: result.confidence,
       scanLogId:  scanLog._id

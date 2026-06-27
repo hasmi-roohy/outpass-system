@@ -272,12 +272,12 @@ const forwardToParents = async (req, res) => {
     outpass.status          = 'warden_forwarded'
     await outpass.save()
 
-    runEmailInBackground('Parent email delivery', () => sendOutpassMail(student, outpass, parentTokens))
+    const emailDelivery = await sendOutpassMail(student, outpass, parentTokens)
 
     res.status(200).json({
-      message: `Outpass forwarded. ${parentTokens.length} parent email${parentTokens.length === 1 ? '' : 's'} are being sent in the background.`,
+      message: `Outpass forwarded. Parent emails sent: ${emailDelivery.sent}, failed: ${emailDelivery.failed}, skipped: ${emailDelivery.skipped}.`,
       outpass,
-      emailDelivery: { status: 'sending', total: parentTokens.length }
+      emailDelivery
     })
 
   } catch (error) {
@@ -308,10 +308,10 @@ const resendParentEmails = async (req, res) => {
     })
     await outpass.save()
 
-    runEmailInBackground('Parent email resend delivery', () => sendOutpassMail(outpass.studentId, outpass, pendingParents))
-    const message = `${pendingParents.length} parent email${pendingParents.length === 1 ? '' : 's'} are being resent in the background`
+    const emailDelivery = await sendOutpassMail(outpass.studentId, outpass, pendingParents)
+    const message = `Parent emails resent. Sent: ${emailDelivery.sent}, failed: ${emailDelivery.failed}, skipped: ${emailDelivery.skipped}.`
 
-    res.status(200).json({ message, emailDelivery: { status: 'sending', total: pendingParents.length } })
+    res.status(200).json({ message, emailDelivery })
   } catch (error) {
     if (error.code === 11000) {
       return res.status(400).json({ message: 'You already have an active outpass' })

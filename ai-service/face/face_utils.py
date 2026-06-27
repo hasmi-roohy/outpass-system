@@ -11,6 +11,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+FACE_MODEL = os.getenv("FACE_MODEL", "Facenet512")
+FACE_DETECTOR = os.getenv("FACE_DETECTOR", "opencv")
+FACE_DISTANCE_METRIC = os.getenv("FACE_DISTANCE_METRIC", "cosine")
+FACE_THRESHOLD = os.getenv("FACE_THRESHOLD")
+FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "160"))
+FACE_MIN_BLUR = float(os.getenv("FACE_MIN_BLUR", "25"))
+FACE_MIN_BRIGHTNESS = float(os.getenv("FACE_MIN_BRIGHTNESS", "35"))
+FACE_MAX_BRIGHTNESS = float(os.getenv("FACE_MAX_BRIGHTNESS", "220"))
+FACE_MAX_DIMENSION = int(os.getenv("FACE_MAX_DIMENSION", "900"))
+
 # ─────────────────────────────────────
 # Cloudinary config
 # ─────────────────────────────────────
@@ -45,7 +55,8 @@ def warmup_model():
         DeepFace.verify(
             img1_path         = warmup_path,
             img2_path         = warmup_path,
-            model_name        = "VGG-Face",
+            model_name        = FACE_MODEL,
+            detector_backend  = FACE_DETECTOR,
             enforce_detection = False
         )
         if os.path.exists(warmup_path):
@@ -74,6 +85,58 @@ def base64_to_image(base64_string):
 # ─────────────────────────────────────
 # Upload image to Cloudinary
 # ─────────────────────────────────────
+def preprocess_image(img):
+    height, width = img.shape[:2]
+    largest_side = max(width, height)
+
+    if largest_side > FACE_MAX_DIMENSION:
+        scale = FACE_MAX_DIMENSION / largest_side
+        img = cv2.resize(
+            img,
+            (int(width * scale), int(height * scale)),
+            interpolation=cv2.INTER_AREA
+        )
+
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced_l = clahe.apply(l_channel)
+    enhanced = cv2.merge((enhanced_l, a_channel, b_channel))
+    return cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+
+def validate_image_quality(img):
+    height, width = img.shape[:2]
+    if width < FACE_MIN_SIZE or height < FACE_MIN_SIZE:
+        return False, "Image is too small. Move closer to the camera."
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    brightness = float(np.mean(gray))
+    if brightness < FACE_MIN_BRIGHTNESS:
+        return False, "Image is too dark. Improve lighting and try again."
+    if brightness > FACE_MAX_BRIGHTNESS:
+        return False, "Image is too bright. Avoid strong backlight and try again."
+
+    blur_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    if blur_score < FACE_MIN_BLUR:
+        return False, "Image is blurry. Hold still and try again."
+
+    return True, ""
+
+def detect_face_count(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+    detector = cv2.CascadeClassifier(cascade_path)
+    faces = detector.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(60, 60)
+    )
+    return len(faces)
+
+def save_image(path, img):
+    cv2.imwrite(path, img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+
 def upload_to_cloudinary(img_path, public_id):
     try:
         result = cloudinary.uploader.upload(
@@ -117,6 +180,17 @@ def register_face(base64_image, student_id, face_type="student", parent_index=No
         if img is None:
             return { "success": False, "message": "Invalid image" }
 
+        img = preprocess_image(img)
+        is_valid, quality_message = validate_image_quality(img)
+        if not is_valid:
+            return { "success": False, "message": quality_message }
+
+        face_count = detect_face_count(img)
+        if face_count == 0:
+            return { "success": False, "message": "No clear face detected. Face the camera and try again." }
+        if face_count > 1:
+            return { "success": False, "message": "Multiple faces detected. Register one person at a time." }
+
         # ── Build local path ──
         if face_type == "student":
             folder   = os.path.join(STUDENT_FACES_DIR, student_id)
@@ -131,7 +205,7 @@ def register_face(base64_image, student_id, face_type="student", parent_index=No
         img_path = os.path.abspath(os.path.join(folder, filename))
 
         # ── Save locally ──
-        cv2.imwrite(img_path, img)
+        save_image(img_path, img)
         print(f"✅ Face saved locally: {img_path}")
 
         # ── Backup to Cloudinary ──
@@ -158,9 +232,20 @@ def verify_face(base64_image, student_id, face_type="student", parent_index=None
     try:
         img = base64_to_image(base64_image)
         if img is None:
-            return { "matched": False, "confidence": 0 }
+            return { "matched": False, "confidence": 0, "message": "Invalid image" }
 
-        cv2.imwrite(temp_path, img)
+        img = preprocess_image(img)
+        is_valid, quality_message = validate_image_quality(img)
+        if not is_valid:
+            return { "matched": False, "confidence": 0, "message": quality_message }
+
+        face_count = detect_face_count(img)
+        if face_count == 0:
+            return { "matched": False, "confidence": 0, "message": "No clear face detected. Face the camera and try again." }
+        if face_count > 1:
+            return { "matched": False, "confidence": 0, "message": "Multiple faces detected. Scan only the student." }
+
+        save_image(temp_path, img)
 
         # ── Build stored path ──
         if face_type == "student":
@@ -190,14 +275,19 @@ def verify_face(base64_image, student_id, face_type="student", parent_index=None
 
         print(f"✅ Found face, verifying...")
 
-        result = DeepFace.verify(
-            img1_path         = temp_path,
-            img2_path         = stored_path,
-            model_name        = "VGG-Face",
-            enforce_detection = False,
-            distance_metric   = "cosine",
-            threshold         = 0.50
-        )
+        verify_options = {
+            "img1_path": temp_path,
+            "img2_path": stored_path,
+            "model_name": FACE_MODEL,
+            "detector_backend": FACE_DETECTOR,
+            "enforce_detection": True,
+            "distance_metric": FACE_DISTANCE_METRIC
+        }
+
+        if FACE_THRESHOLD:
+            verify_options["threshold"] = float(FACE_THRESHOLD)
+
+        result = DeepFace.verify(**verify_options)
 
         matched    = result["verified"]
         distance   = result["distance"]

@@ -1,9 +1,7 @@
 const nodemailer = require('nodemailer')
-const dns = require('dns').promises
 
 const emailPassword = (process.env.EMAIL_PASS || '').replace(/\s/g, '')
 const rejectUnauthorized = process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false'
-let smtpAddressPromise
 
 const escapeHtml = value => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -12,67 +10,22 @@ const escapeHtml = value => String(value ?? '')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;')
 
-const getSmtpAddress = async () => {
-  if (!smtpAddressPromise) {
-    smtpAddressPromise = dns.lookup('smtp.gmail.com', { family: 4 })
-      .then(({ address }) => {
-        console.log(`Gmail SMTP IPv4 resolved: ${address}`)
-        return address
-      })
-      .catch(error => {
-        smtpAddressPromise = null
-        throw error
-      })
-  }
-  return smtpAddressPromise
-}
-
-const createTransporter = (address, options) => nodemailer.createTransport({
-  host: address,
-  port: options.port,
-  secure: options.secure,
-  requireTLS: options.requireTLS,
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 20000,
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
     pass: emailPassword
   },
+  connectionTimeout: 15000,
+  greetingTimeout: 10000,
+  socketTimeout: 20000,
   tls: {
     servername: 'smtp.gmail.com',
     rejectUnauthorized
   }
 })
 
-const sendWithTransport = async (mailOptions, options) => {
-  const address = await getSmtpAddress()
-  const transporter = createTransporter(address, options)
-  try {
-    const result = await transporter.sendMail(mailOptions)
-    console.log(`Gmail SMTP sent via port ${options.port}`)
-    return result
-  } finally {
-    transporter.close()
-  }
-}
-
-const sendMail = async mailOptions => {
-  try {
-    return await sendWithTransport(mailOptions, {
-      port: 465,
-      secure: true,
-      requireTLS: false
-    })
-  } catch (primaryError) {
-    console.log(`Gmail SMTP port 465 failed: ${primaryError.message}`)
-    return sendWithTransport(mailOptions, {
-      port: 587,
-      secure: false,
-      requireTLS: true
-    })
-  }
-}
+const sendMail = mailOptions => transporter.sendMail(mailOptions)
 
 const formatDate = value => new Date(value).toDateString()
 const formatDateTime = value => new Date(value).toLocaleString()
@@ -162,8 +115,7 @@ const sendOutpassMail = async (student, outpass, parentTokens) => {
         </div>
 
         <p style="color: #64748b; font-size: 13px; text-align: center;">
-          Approve grants the outpass immediately. Decline rejects the outpass immediately.
-          These buttons are unique to you and expire after the request is completed or the link expires.
+          Tap once to approve or decline. No login or face verification is required.
         </p>
       `
 

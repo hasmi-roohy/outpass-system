@@ -45,7 +45,7 @@
         "outpass limit",
         "maximum outpass per month"
       ],
-      "response": "Outpass Rules: You can apply maximum 2 outpasses per month. You cannot apply if you already have an active outpass. Outpass expires at end of your return date. Make sure to do face scan at gate when leaving and returning."
+      "response": "Outpass Rules: You can use maximum 6 completed outpasses per month. You cannot apply if you already have an active outpass. Outpass expires at the approved return time. Make sure to do face scan at the gate when leaving and returning."
     },
     {
       "tag": "message_warden",

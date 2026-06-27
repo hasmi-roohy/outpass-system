@@ -87,6 +87,24 @@ export default function GateScanner() {
     return canvas.toDataURL('image/jpeg')
   }
 
+  const updateScannedOutpass = ({ matched, confidence }) => {
+    const scanKey = scanType === 'exit' ? 'exitScan' : 'returnScan'
+    const nextStatus = scanType === 'exit' ? 'out' : 'returned'
+
+    setOutpass(current => current
+      ? {
+          ...current,
+          status: nextStatus,
+          [scanKey]: {
+            time: new Date().toISOString(),
+            matched,
+            confidence
+          }
+        }
+      : current
+    )
+  }
+
   const handleScan = async () => {
     if (!outpass) return
     setLoading(true)
@@ -101,6 +119,12 @@ export default function GateScanner() {
         : await verifyReturnApi(data)
 
       setResult(res.data)
+      if (res.data?.matched) {
+        updateScannedOutpass({
+          matched: true,
+          confidence: res.data.confidence
+        })
+      }
       stopCamera()
     } catch (err) {
       setResult({
@@ -124,6 +148,7 @@ export default function GateScanner() {
         overrideNote: note
       })
       setOverrideDone(true)
+      updateScannedOutpass({ matched: false, confidence: 0 })
       setResult({ matched: true, message: '✅ Manual override applied successfully' })
     } catch {
       alert('Override failed. Please try again.')
