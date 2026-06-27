@@ -3,7 +3,7 @@ const dns = require('dns').promises
 
 const emailPassword = (process.env.EMAIL_PASS || '').replace(/\s/g, '')
 const rejectUnauthorized = process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false'
-let transporterPromise
+let smtpAddressPromise
 
 const escapeHtml = value => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -12,38 +12,66 @@ const escapeHtml = value => String(value ?? '')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;')
 
-const createTransporter = async () => {
-  const { address } = await dns.lookup('smtp.gmail.com', { family: 4 })
-  console.log(`Gmail SMTP IPv4 resolved: ${address}`)
-
-  return nodemailer.createTransport({
-    host: address,
-    port: 465,
-    secure: true,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: emailPassword
-    },
-    tls: {
-      servername: 'smtp.gmail.com',
-      rejectUnauthorized
-    }
-  })
+const getSmtpAddress = async () => {
+  if (!smtpAddressPromise) {
+    smtpAddressPromise = dns.lookup('smtp.gmail.com', { family: 4 })
+      .then(({ address }) => {
+        console.log(`Gmail SMTP IPv4 resolved: ${address}`)
+        return address
+      })
+      .catch(error => {
+        smtpAddressPromise = null
+        throw error
+      })
+  }
+  return smtpAddressPromise
 }
 
-const getTransporter = () => {
-  if (!transporterPromise) {
-    transporterPromise = createTransporter().catch(error => {
-      transporterPromise = null
-      throw error
-    })
+const createTransporter = (address, options) => nodemailer.createTransport({
+  host: address,
+  port: options.port,
+  secure: options.secure,
+  requireTLS: options.requireTLS,
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 20000,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: emailPassword
+  },
+  tls: {
+    servername: 'smtp.gmail.com',
+    rejectUnauthorized
   }
-  return transporterPromise
+})
+
+const sendWithTransport = async (mailOptions, options) => {
+  const address = await getSmtpAddress()
+  const transporter = createTransporter(address, options)
+  try {
+    const result = await transporter.sendMail(mailOptions)
+    console.log(`Gmail SMTP sent via port ${options.port}`)
+    return result
+  } finally {
+    transporter.close()
+  }
 }
 
 const sendMail = async mailOptions => {
-  const transporter = await getTransporter()
-  return transporter.sendMail(mailOptions)
+  try {
+    return await sendWithTransport(mailOptions, {
+      port: 465,
+      secure: true,
+      requireTLS: false
+    })
+  } catch (primaryError) {
+    console.log(`Gmail SMTP port 465 failed: ${primaryError.message}`)
+    return sendWithTransport(mailOptions, {
+      port: 587,
+      secure: false,
+      requireTLS: true
+    })
+  }
 }
 
 const formatDate = value => new Date(value).toDateString()
